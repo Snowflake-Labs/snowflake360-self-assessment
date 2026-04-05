@@ -1,0 +1,50 @@
+from services.Common.Data_Config import DataConfig
+from .base_metric import BaseMetric
+
+
+class AnalysisMetric(BaseMetric):
+    def __init__(self, service) -> None:
+        super().__init__()
+        self.service = service
+        self._display_data = self.service.data
+        self.display_data_copy = self.service.data
+        self.pivot_data = None
+        self.pivot_data_copy = None
+        self.has_custom_columns = False
+        self._metric_key = None
+        self.data_size = 20
+
+    @property
+    def metric_key (self):
+        return self._metric_key
+
+    @property
+    def raw_data (self):
+        return self.display_data_copy
+
+    @property
+    def display_data(self):
+        if self._display_data is None or self._display_data.empty:
+            return self._display_data
+
+        if self.has_custom_columns:
+            return self._display_data.head(self.data_size)
+
+        if self._metric_key is not None and DataConfig.has_custom_columns(self._metric_key):
+            return DataConfig.exclude_columns(self._metric_key,
+                                              DataConfig.get_columns_to_exclude(self._metric_key),
+                                              self._display_data.head(self.data_size))
+
+        return self._display_data.head(self.data_size)
+
+    @metric_key.setter
+    def metric_key(self, value) -> None:
+        self._metric_key = value
+
+    @display_data.setter
+    def display_data(self, value) -> None:
+        self._display_data = value
+
+    def restart_loading(self):
+        self.service.start_loading()
+        self.display_data = self.service.data

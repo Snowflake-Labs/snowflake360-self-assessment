@@ -1,0 +1,115 @@
+{
+  "Home": [],
+  "Database Management": [
+    {
+      "comp_name": "db_overview",
+      "description": "Overview of database storage, object counts, and credit consumption with storage, clustering, lifespan, and churn sub-tabs",
+      "tab_name": "📊 Database Overview",
+      "fn": "analysis_comp_handler.db_overview"
+    },
+    {
+      "comp_name": "db_management_analyzer",
+      "description": "Deep analysis of database objects, health metrics, and optimization recommendations",
+      "tab_name": "🚀 Database Management Analyzer",
+      "fn": "analysis_comp_handler.db_management_analyzer"
+    }
+  ],
+  "Data Governance": [
+    {
+      "comp_name": "governance_overview",
+      "description": "Overview of data governance with health score, sensitivity heatmap, policy inventory, tagging, privacy, and lineage sub-tabs",
+      "tab_name": "📊 Data Governance Overview",
+      "fn": "analysis_comp_handler.governance_overview"
+    },
+    {
+      "comp_name": "governance_analyzer",
+      "description": "AI-powered data governance analysis and recommendations",
+      "tab_name": "🚀 Data Governance Analyzer",
+      "fn": "analysis_comp_handler.governance_analyzer"
+    }
+  ],
+  "Virtual Warehouses": [
+    {
+      "comp_name": "warehouse_overview",
+      "description": "Overview of virtual warehouses with scaling management and performance monitoring sub-tabs",
+      "tab_name": "📊 Warehouses Overview",
+      "fn": "analysis_comp_handler.warehouse_overview"
+    },
+    {
+      "comp_name": "warehouse_analysis",
+      "description": "",
+      "tab_name": "🚀 Warehouse Analyzer",
+      "fn": "analysis_comp_handler.warehouse_analysis"
+    }
+  ],
+  "Access Control": [
+    {
+      "comp_name": "access_control_overview",
+      "description": "Overview of access control with authorization, authentication, and network rules & policies sub-tabs",
+      "tab_name": "📊 Access Control Overview",
+      "fn": "analysis_comp_handler.access_control_overview"
+    },
+    {
+      "comp_name": "access_control_analysis",
+      "description": "AI-powered access control analysis with summary and individual role insights",
+      "tab_name": "🚀 Access Control Analyzer",
+      "fn": "analysis_comp_handler.access_control_analysis"
+    }
+  ],
+  "Data Ingestion": [
+    {
+      "comp_name": "ingestion_overview",
+      "description": "Overview of data ingestion with highest cost, bulk load, and snowpipe analysis sub-tabs",
+      "tab_name": "📊 Data Ingestion Overview",
+      "fn": "analysis_comp_handler.ingestion_overview"
+    },
+    {
+      "comp_name": "ingestion_analyzer",
+      "description": "AI-powered analysis of data ingestion patterns",
+      "tab_name": "🚀 Data Ingestion Analyzer",
+      "fn": "analysis_comp_handler.ingestion_analyzer"
+    }
+  ],
+  "Data Transformation": [
+    {
+      "comp_name": "transformation_overview",
+      "description": "Overview of data transformation with problematic queries, syntax hunter, object structure, and workload shape sub-tabs",
+      "tab_name": "📊 Data Transformation Overview",
+      "fn": "analysis_comp_handler.transformation_overview"
+    },
+    {
+      "comp_name": "transformation_analyzer",
+      "description": "AI-powered analysis of data transformation patterns",
+      "tab_name": "🚀 Data Transformation Analyzer",
+      "fn": "analysis_comp_handler.transformation_analyzer"
+    }
+  ],
+  "FinOps (lite)": [
+    {
+      "comp_name": "finops_overview",
+      "description": "Overview of FinOps (Lite) module with Visibility, Control, and Optimisation sub-tabs",
+      "tab_name": "📊 FinOPS (Lite) Overview",
+      "fn": "analysis_comp_handler.finops_overview"
+    },
+    {
+      "comp_name": "finops_analyzer",
+      "description": "AI-powered FinOps analysis and warehouse cost optimization recommendations",
+      "tab_name": "🚀 FinOps Analyzer",
+      "fn": "analysis_comp_handler.finops_analyzer"
+    }
+  ],
+  "Data Recovery & DevOps": [
+    {
+      "comp_name": "recovery_devops_overview",
+      "description": "Overview of data recovery and DevOps practices with DCM, Git, CI/CD, and Dynamic Tables sub-tabs",
+      "tab_name": "📊 Data Recovery & DevOps Overview",
+      "fn": "analysis_comp_handler.recovery_devops_overview"
+    },
+    {
+      "comp_name": "recovery_devops_analyzer",
+      "description": "AI-powered analysis of recovery and DevOps practices",
+      "tab_name": "🚀 Data Recovery & DevOps Analyzer",
+      "fn": "analysis_comp_handler.recovery_devops_analyzer"
+    }
+  ]
+}

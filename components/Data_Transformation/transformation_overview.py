@@ -1,0 +1,1051 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from streamlit_echarts import st_echarts
+from .problematic_query_report import comp_problematic_query_report
+from .syntax_hunter import comp_syntax_hunter
+from .object_structure_analysis import comp_object_structure_analysis
+from .workload_shape import comp_workload_shape
+
+
+def comp_transformation_overview(entry_actions=None):
+    """
+    Data Transformation Overview Component
+
+    Renders sub-tabs for:
+    - Overview: Comprehensive data transformation landscape assessment
+    - Problematic Query - Report (Native Insights)
+    - Syntax Hunter (Regex & Heuristics)
+    - Object Structure Analysis (Stacked Views & Security)
+    - Workload Shape (Updates, MVs, RAPs)
+
+    Args:
+        entry_actions: Optional callback actions on component entry
+    """
+    try:
+        sub_tab_names = [
+            "Overview",
+            "Problematic Query - Report (Native Insights)",
+            "Syntax Hunter (Regex & Heuristics)",
+            "Object Structure Analysis (Stacked Views & Security)",
+            "Workload Shape (Updates, MVs, RAPs)"
+        ]
+        sub_tabs = st.tabs(sub_tab_names)
+
+        with sub_tabs[0]:
+            _render_overview_content()
+
+        with sub_tabs[1]:
+            comp_problematic_query_report()
+
+        with sub_tabs[2]:
+            comp_syntax_hunter()
+
+        with sub_tabs[3]:
+            comp_object_structure_analysis()
+
+        with sub_tabs[4]:
+            comp_workload_shape()
+
+    except Exception as e:
+        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                    f'🛑&nbsp;&nbsp;Error loading Data Transformation Overview: {str(e)}'
+                    f'</div>', unsafe_allow_html=True)
+
+
+def _render_overview_content():
+    """Render the core data transformation overview content (landscape assessment, charts)."""
+    try:
+        # Get session and context
+        try:
+            from snowflake.snowpark.context import get_active_session
+            session = get_active_session()
+        except Exception as e:
+            # st.error(f"Unable to get Snowflake session: {str(e)}")
+            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                        f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
+                        f'</div>', unsafe_allow_html=True)
+            return
+
+        if not session:
+            # st.warning("⚠️ Snowflake session not available.")
+            st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                            '⚠️&nbsp;&nbsp;Snowflake session not available.'
+                            '</div>', unsafe_allow_html=True)
+            return
+
+        # Build and execute the query
+        query = f"""
+WITH
+-- 1. Clustered vs unclustered base tables
+clustered_tables AS (
+  SELECT
+    SUM(CASE WHEN clustering_key IS NOT NULL THEN 1 ELSE 0 END) AS clustered_tables,
+    SUM(CASE WHEN clustering_key IS NULL  THEN 1 ELSE 0 END)    AS unclustered_tables
+  FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+  WHERE table_type = 'BASE TABLE'
+    AND deleted IS NULL
+),
+
+-- 2. Materialized views (defined)
+materialized_views AS (
+  SELECT COUNT(*) AS num_materialized_views
+  FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+  WHERE table_type = 'MATERIALIZED VIEW'
+    AND deleted IS NULL
+),
+
+-- 3. Tables with semi-structured columns (VARIANT/OBJECT/ARRAY)
+semi_structured_tables AS (
+  SELECT
+    COUNT(DISTINCT c.table_catalog || '.' || c.table_schema || '.' || c.table_name)
+      AS num_tables_with_semi_structured
+  FROM SNOWFLAKE.ACCOUNT_USAGE.COLUMNS c
+  JOIN SNOWFLAKE.ACCOUNT_USAGE.TABLES  t
+    ON c.table_id = t.table_id
+  WHERE t.table_type = 'BASE TABLE'
+    AND t.deleted IS NULL
+    AND c.deleted IS NULL
+    AND c.data_type IN ('VARIANT','OBJECT','ARRAY')
+),
+
+-- 4. Dynamic tables
+dynamic_tables AS (
+  SELECT COUNT(*) AS num_dynamic_tables
+  FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+  WHERE is_dynamic = 'YES'
+    AND deleted IS NULL
+),
+
+-- 5. Hybrid tables
+hybrid_tables AS (
+  SELECT COUNT(*) AS num_hybrid_tables
+  FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+  WHERE (is_hybrid = 'YES')
+    AND deleted IS NULL
+),
+
+-- 6. Event tables
+event_tables AS (
+  SELECT COUNT(*) AS num_event_tables
+  FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+  WHERE table_type = 'EVENT TABLE'
+    AND deleted IS NULL
+),
+
+-- 7. Semantic views
+semantic_views AS (
+  SELECT COUNT(*) AS num_semantic_views
+  FROM SNOWFLAKE.ACCOUNT_USAGE.SEMANTIC_VIEWS
+  WHERE deleted IS NULL
+),
+
+-- 8. Warehouses with spilling or high queueing in last 30 days
+spill_or_queue_wh AS (
+  SELECT
+    COUNT(DISTINCT warehouse_name) AS num_warehouses_spill_or_queue_last_30d
+  FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+  WHERE start_time > DATEADD(day, -30, CURRENT_TIMESTAMP())
+    AND warehouse_name IS NOT NULL
+    AND (
+         bytes_spilled_to_remote_storage > 0
+      OR bytes_spilled_to_local_storage  > 0
+      OR queued_overload_time            > 0
+    )
+),
+
+-- 9. Short UPSERTs (MERGE with few rows affected) in last 30 days
+short_upserts AS (
+  SELECT
+    COUNT(*) AS num_short_upserts_last_30d
+  FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+  WHERE start_time > DATEADD(day, -30, CURRENT_TIMESTAMP())
+    AND query_type = 'MERGE'
+    AND (rows_inserted + rows_updated) BETWEEN 1 AND 1000
+),
+
+-- 10. Snowpark queries in last 30 days (by client_application_id)
+snowpark_queries AS (
+  SELECT
+    COUNT(DISTINCT q.query_id) AS num_snowpark_queries_last_30d
+  FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY q
+  JOIN SNOWFLAKE.ACCOUNT_USAGE.SESSIONS     s
+    ON q.session_id = s.session_id
+  WHERE q.start_time > DATEADD(day, -30, CURRENT_TIMESTAMP())
+    AND s.client_application_id ILIKE 'SNOWPARK%'
+),
+
+-- 11. Data clustering: tables with clustering keys and auto clustering ON
+clustered_data AS (
+  SELECT
+    COUNT(*) AS num_clustered_tables_with_key,
+    SUM(CASE WHEN auto_clustering_on = 'ON' THEN 1 ELSE 0 END)
+      AS num_tables_with_auto_clustering
+  FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+  WHERE table_type = 'BASE TABLE'
+    AND deleted IS NULL
+    AND clustering_key IS NOT NULL
+),
+
+-- 12. High cloud services usage days in last 30 days
+high_cloud_services AS (
+  SELECT
+    COUNT(*) AS num_wh_days_high_cloud_services_last_30d
+  FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
+  WHERE start_time > DATEADD(day, -30, CURRENT_TIMESTAMP())
+    AND credits_used_cloud_services > 10
+)
+
+SELECT
+  -- Clustered vs unclustered tables
+  ct.clustered_tables,
+  ct.unclustered_tables,
+
+  -- Materialized views
+  mv.num_materialized_views,
+
+  -- Semi-structured tables
+  ss.num_tables_with_semi_structured,
+
+  -- Dynamic, hybrid, event tables
+  dt.num_dynamic_tables,
+  ht.num_hybrid_tables,
+  et.num_event_tables,
+
+  -- Semantic views
+  sv.num_semantic_views,
+
+  -- Spill / high queue
+  w.num_warehouses_spill_or_queue_last_30d,
+
+  -- Short upserts
+  su.num_short_upserts_last_30d,
+
+  -- Snowpark
+  sp.num_snowpark_queries_last_30d,
+
+  -- Data clustering
+  cd.num_clustered_tables_with_key,
+  cd.num_tables_with_auto_clustering,
+
+  -- High cloud services usage
+  hc.num_wh_days_high_cloud_services_last_30d
+
+FROM clustered_tables     ct
+CROSS JOIN materialized_views mv
+CROSS JOIN semi_structured_tables ss
+CROSS JOIN dynamic_tables   dt
+CROSS JOIN hybrid_tables    ht
+CROSS JOIN event_tables     et
+CROSS JOIN semantic_views   sv
+CROSS JOIN spill_or_queue_wh w
+CROSS JOIN short_upserts    su
+CROSS JOIN snowpark_queries sp
+CROSS JOIN clustered_data   cd
+CROSS JOIN high_cloud_services hc
+        """
+
+
+        # Execute query
+        try:
+            df = session.sql(query).to_pandas()
+        except Exception as e:
+            # st.error(f"Error executing query: {str(e)}")
+            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                        f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
+                        f'</div>', unsafe_allow_html=True)
+            return
+
+        if df.empty:
+            st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                        '⚠️&nbsp;&nbsp;No data transformation landscape data found.'
+                        '</div>', unsafe_allow_html=True)
+            return
+
+        # Create expander with introduction text
+        with st.expander("Data Transformation Landscape Assessment", expanded=True):
+            # Introduction text without CSS styling
+            st.markdown("Comprehensive data transformation landscape assessment covering table types, clustering status, "
+                       "materialized views, semi-structured data, dynamic/hybrid/event tables, semantic views, "
+                       "warehouse performance issues, and Snowpark usage.")
+
+            # st.markdown("---")
+
+
+            # Create metric object for dialogs
+            # Transpose the data for better display
+            display_df = df.T.reset_index()
+            display_df.columns = ['METRIC', 'VALUE']
+            # Skip the first two rows (execution_id and account_id)
+            display_df = display_df.iloc[2:].reset_index(drop=True)
+
+            # Make the metric names more readable
+            metric_names = {
+                'CLUSTERED_TABLES': 'Clustered Tables',
+                'UNCLUSTERED_TABLES': 'Unclustered Tables',
+                'NUM_MATERIALIZED_VIEWS': 'Materialized Views',
+                'NUM_TABLES_WITH_SEMI_STRUCTURED': 'Tables with Semi-Structured Data',
+                'NUM_DYNAMIC_TABLES': 'Dynamic Tables',
+                'NUM_HYBRID_TABLES': 'Hybrid Tables',
+                'NUM_EVENT_TABLES': 'Event Tables',
+                'NUM_SEMANTIC_VIEWS': 'Semantic Views',
+                'NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D': 'Warehouses with Spill/Queue (30d)',
+                'NUM_SHORT_UPSERTS_LAST_30D': 'Short UPSERTs (30d)',
+                'NUM_SNOWPARK_QUERIES_LAST_30D': 'Snowpark Queries (30d)',
+                'NUM_CLUSTERED_TABLES_WITH_KEY': 'Tables with Clustering Key',
+                'NUM_TABLES_WITH_AUTO_CLUSTERING': 'Tables with Auto Clustering',
+                'NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D': 'High Cloud Services Days (30d)'
+            }
+            display_df['METRIC'] = display_df['METRIC'].apply(lambda x: metric_names.get(x, x))
+
+            # Initialize or update metric object in session state
+
+
+            # Display the dataframe
+            st.dataframe(
+                df,
+                hide_index=True
+            )
+
+            # Charts Section
+            # st.markdown("---")
+            st.markdown("#### Transformation Landscape Charts")
+
+            # Prepare data for charts from the original dataframe
+            row = df.iloc[0]
+
+            # Row 1: Two charts
+            col1, col2 = st.columns(2)
+
+            with col1.container(border=True):
+                st.markdown("##### Table Clustering Distribution")
+                _render_clustering_chart(row, key_prefix="clustering_")
+
+            with col2.container(border=True):
+                st.markdown("##### Table Types Distribution")
+                _render_table_types_chart(row, key_prefix="table_types_")
+
+            # Row 2: Two charts
+            col3, col4 = st.columns(2)
+
+            with col3.container(border=True):
+                st.markdown("##### Warehouse Performance Issues (30 Days)")
+                _render_warehouse_issues_chart(row, key_prefix="wh_issues_")
+
+            with col4.container(border=True):
+                st.markdown("##### Query & Usage Patterns (30 Days)")
+                _render_query_patterns_chart(row, key_prefix="query_patterns_")
+
+    except Exception as e:
+        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                    f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
+                    f'</div>', unsafe_allow_html=True)
+
+
+# ============================
+# Chart Type Selector & Charts
+# ============================
+
+def _render_clustering_chart(row, key_prefix=""):
+    """Render table clustering distribution chart with selectable chart types."""
+    chart_type = st.selectbox(
+        "Change Chart Type",
+        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
+        index=0,
+        key=f"{key_prefix}chart_type"
+    )
+
+    if chart_type == "Bar Chart":
+        _render_clustering_bar_chart(row, key_prefix)
+    elif chart_type == "Pie Chart":
+        _render_clustering_pie_chart(row, key_prefix)
+    elif chart_type == "Pie - Donut":
+        _render_clustering_donut_chart(row, key_prefix)
+    else:
+        _render_clustering_rose_chart(row, key_prefix)
+
+
+def _render_clustering_bar_chart(row, key_prefix=""):
+    """Render clustering bar chart using Plotly."""
+    categories = ['Clustered Tables', 'Unclustered Tables', 'Auto Clustering ON']
+    values = [
+        int(row['CLUSTERED_TABLES']),
+        int(row['UNCLUSTERED_TABLES']),
+        int(row['NUM_TABLES_WITH_AUTO_CLUSTERING'])
+    ]
+
+    # Sort for horizontal bar layout
+    sorted_data = sorted(zip(values, categories), reverse=False)
+    values_sorted = [v for v, c in sorted_data]
+    categories_sorted = [c for v, c in sorted_data]
+
+    fig = go.Figure(data=[
+        go.Bar(
+            y=categories_sorted,
+            x=values_sorted,
+            orientation='h',
+            marker_color='#1f77b4',
+            text=[f"{int(val)}" for val in values_sorted],
+            textposition='outside',
+            textfont=dict(size=10),
+            hovertemplate='<b>%{y}</b><br>Count: %{x:,}<extra></extra>'
+        )
+    ])
+
+    fig.update_layout(
+        height=400,
+        xaxis_title='Number of Tables',
+        yaxis_title='',
+        showlegend=False,
+        margin=dict(t=20, b=50, l=120, r=50)
+    )
+
+
+def _render_clustering_pie_chart(row, key_prefix=""):
+    """Render clustering pie chart using ECharts."""
+    chart_data = [
+        {"value": int(row['CLUSTERED_TABLES']), "name": f"Clustered ({int(row['CLUSTERED_TABLES'])})"},
+        {"value": int(row['UNCLUSTERED_TABLES']), "name": f"Unclustered ({int(row['UNCLUSTERED_TABLES'])})"},
+        {"value": int(row['NUM_TABLES_WITH_AUTO_CLUSTERING']), "name": f"Auto Clustering ({int(row['NUM_TABLES_WITH_AUTO_CLUSTERING'])})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 5,
+            "itemWidth": 10,
+            "textStyle": {"fontSize": 9}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "series": [{
+            "name": "Clustering",
+            "type": "pie",
+            "radius": ["0%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
+
+
+def _render_clustering_donut_chart(row, key_prefix=""):
+    """Render clustering donut chart using ECharts."""
+    chart_data = [
+        {"value": int(row['CLUSTERED_TABLES']), "name": f"Clustered ({int(row['CLUSTERED_TABLES'])})"},
+        {"value": int(row['UNCLUSTERED_TABLES']), "name": f"Unclustered ({int(row['UNCLUSTERED_TABLES'])})"},
+        {"value": int(row['NUM_TABLES_WITH_AUTO_CLUSTERING']), "name": f"Auto Clustering ({int(row['NUM_TABLES_WITH_AUTO_CLUSTERING'])})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 5,
+            "itemWidth": 10,
+            "textStyle": {"fontSize": 9}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "series": [{
+            "name": "Clustering",
+            "type": "pie",
+            "radius": ["30%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 8},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
+
+
+def _render_clustering_rose_chart(row, key_prefix=""):
+    """Render clustering rose chart using ECharts."""
+    chart_data = [
+        {"value": int(row['CLUSTERED_TABLES']), "name": "Clustered Tables"},
+        {"value": int(row['UNCLUSTERED_TABLES']), "name": "Unclustered Tables"},
+        {"value": int(row['NUM_TABLES_WITH_AUTO_CLUSTERING']), "name": "Auto Clustering"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 5,
+            "itemWidth": 10,
+            "textStyle": {"fontSize": 9}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "series": [{
+            "name": "Clustering",
+            "type": "pie",
+            "radius": ["10%", "55%"],
+            "center": ["50%", "40%"],
+            "roseType": "area",
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+
+
+def _render_table_types_chart(row, key_prefix=""):
+    """Render table types distribution chart with selectable chart types."""
+    chart_type = st.selectbox(
+        "Change Chart Type",
+        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
+        index=0,
+        key=f"{key_prefix}chart_type"
+    )
+
+    if chart_type == "Bar Chart":
+        _render_table_types_bar_chart(row, key_prefix)
+    elif chart_type == "Pie Chart":
+        _render_table_types_pie_chart(row, key_prefix)
+    elif chart_type == "Pie - Donut":
+        _render_table_types_donut_chart(row, key_prefix)
+    else:
+        _render_table_types_rose_chart(row, key_prefix)
+
+
+def _render_table_types_bar_chart(row, key_prefix=""):
+    """Render table types bar chart using Plotly."""
+    categories = ['Materialized Views', 'Semi-Structured Tables', 'Dynamic Tables', 'Hybrid Tables', 'Event Tables', 'Semantic Views']
+    values = [
+        int(row['NUM_MATERIALIZED_VIEWS']),
+        int(row['NUM_TABLES_WITH_SEMI_STRUCTURED']),
+        int(row['NUM_DYNAMIC_TABLES']),
+        int(row['NUM_HYBRID_TABLES']),
+        int(row['NUM_EVENT_TABLES']),
+        int(row['NUM_SEMANTIC_VIEWS'])
+    ]
+
+    # Sort for horizontal bar layout
+    sorted_data = sorted(zip(values, categories), reverse=False)
+    values_sorted = [v for v, c in sorted_data]
+    categories_sorted = [c for v, c in sorted_data]
+
+    fig = go.Figure(data=[
+        go.Bar(
+            y=categories_sorted,
+            x=values_sorted,
+            orientation='h',
+            marker_color='#ff7f0e',
+            text=[f"{int(val)}" for val in values_sorted],
+            textposition='outside',
+            textfont=dict(size=10),
+            hovertemplate='<b>%{y}</b><br>Count: %{x:,}<extra></extra>'
+        )
+    ])
+
+    fig.update_layout(
+        height=400,
+        xaxis_title='Count',
+        yaxis_title='',
+        showlegend=False,
+        margin=dict(t=20, b=50, l=150, r=50)
+    )
+
+
+def _render_table_types_pie_chart(row, key_prefix=""):
+    """Render table types pie chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_MATERIALIZED_VIEWS']), "name": f"Materialized Views ({int(row['NUM_MATERIALIZED_VIEWS'])})"},
+        {"value": int(row['NUM_TABLES_WITH_SEMI_STRUCTURED']), "name": f"Semi-Structured ({int(row['NUM_TABLES_WITH_SEMI_STRUCTURED'])})"},
+        {"value": int(row['NUM_DYNAMIC_TABLES']), "name": f"Dynamic Tables ({int(row['NUM_DYNAMIC_TABLES'])})"},
+        {"value": int(row['NUM_HYBRID_TABLES']), "name": f"Hybrid Tables ({int(row['NUM_HYBRID_TABLES'])})"},
+        {"value": int(row['NUM_EVENT_TABLES']), "name": f"Event Tables ({int(row['NUM_EVENT_TABLES'])})"},
+        {"value": int(row['NUM_SEMANTIC_VIEWS']), "name": f"Semantic Views ({int(row['NUM_SEMANTIC_VIEWS'])})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 5,
+            "itemWidth": 10,
+            "textStyle": {"fontSize": 9}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "series": [{
+            "name": "Table Types",
+            "type": "pie",
+            "radius": ["0%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
+
+
+def _render_table_types_donut_chart(row, key_prefix=""):
+    """Render table types donut chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_MATERIALIZED_VIEWS']), "name": f"Materialized Views ({int(row['NUM_MATERIALIZED_VIEWS'])})"},
+        {"value": int(row['NUM_TABLES_WITH_SEMI_STRUCTURED']), "name": f"Semi-Structured ({int(row['NUM_TABLES_WITH_SEMI_STRUCTURED'])})"},
+        {"value": int(row['NUM_DYNAMIC_TABLES']), "name": f"Dynamic Tables ({int(row['NUM_DYNAMIC_TABLES'])})"},
+        {"value": int(row['NUM_HYBRID_TABLES']), "name": f"Hybrid Tables ({int(row['NUM_HYBRID_TABLES'])})"},
+        {"value": int(row['NUM_EVENT_TABLES']), "name": f"Event Tables ({int(row['NUM_EVENT_TABLES'])})"},
+        {"value": int(row['NUM_SEMANTIC_VIEWS']), "name": f"Semantic Views ({int(row['NUM_SEMANTIC_VIEWS'])})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 5,
+            "itemWidth": 10,
+            "textStyle": {"fontSize": 9}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "series": [{
+            "name": "Table Types",
+            "type": "pie",
+            "radius": ["30%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 8},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
+
+
+def _render_table_types_rose_chart(row, key_prefix=""):
+    """Render table types rose chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_MATERIALIZED_VIEWS']), "name": "Materialized Views"},
+        {"value": int(row['NUM_TABLES_WITH_SEMI_STRUCTURED']), "name": "Semi-Structured"},
+        {"value": int(row['NUM_DYNAMIC_TABLES']), "name": "Dynamic Tables"},
+        {"value": int(row['NUM_HYBRID_TABLES']), "name": "Hybrid Tables"},
+        {"value": int(row['NUM_EVENT_TABLES']), "name": "Event Tables"},
+        {"value": int(row['NUM_SEMANTIC_VIEWS']), "name": "Semantic Views"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 5,
+            "itemWidth": 10,
+            "textStyle": {"fontSize": 9}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "series": [{
+            "name": "Table Types",
+            "type": "pie",
+            "radius": ["10%", "55%"],
+            "center": ["50%", "40%"],
+            "roseType": "area",
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+
+
+def _render_warehouse_issues_chart(row, key_prefix=""):
+    """Render warehouse performance issues chart with selectable chart types."""
+    chart_type = st.selectbox(
+        "Change Chart Type",
+        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
+        index=0,
+        key=f"{key_prefix}chart_type"
+    )
+
+    if chart_type == "Bar Chart":
+        _render_warehouse_issues_bar_chart(row, key_prefix)
+    elif chart_type == "Pie Chart":
+        _render_warehouse_issues_pie_chart(row, key_prefix)
+    elif chart_type == "Pie - Donut":
+        _render_warehouse_issues_donut_chart(row, key_prefix)
+    else:
+        _render_warehouse_issues_rose_chart(row, key_prefix)
+
+
+def _render_warehouse_issues_bar_chart(row, key_prefix=""):
+    """Render warehouse issues bar chart using Plotly."""
+    categories = ['WH with Spill/Queue', 'High Cloud Services Days']
+    values = [
+        int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D']),
+        int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D'])
+    ]
+
+    # Sort for horizontal bar layout
+    sorted_data = sorted(zip(values, categories), reverse=False)
+    values_sorted = [v for v, c in sorted_data]
+    categories_sorted = [c for v, c in sorted_data]
+
+    fig = go.Figure(data=[
+        go.Bar(
+            y=categories_sorted,
+            x=values_sorted,
+            orientation='h',
+            marker_color='#d62728',
+            text=[f"{int(val)}" for val in values_sorted],
+            textposition='outside',
+            textfont=dict(size=10),
+            hovertemplate='<b>%{y}</b><br>Count: %{x:,}<extra></extra>'
+        )
+    ])
+
+    fig.update_layout(
+        height=400,
+        xaxis_title='Count',
+        yaxis_title='',
+        showlegend=False,
+        margin=dict(t=20, b=50, l=160, r=50)
+    )
+
+
+def _render_warehouse_issues_pie_chart(row, key_prefix=""):
+    """Render warehouse issues pie chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D']), "name": f"WH with Spill/Queue ({int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D'])})"},
+        {"value": int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D']), "name": f"High Cloud Services Days ({int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D'])})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 8,
+            "itemWidth": 12,
+            "textStyle": {"fontSize": 10}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#d62728", "#ff9896"],
+        "series": [{
+            "name": "WH Issues",
+            "type": "pie",
+            "radius": ["0%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
+
+
+def _render_warehouse_issues_donut_chart(row, key_prefix=""):
+    """Render warehouse issues donut chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D']), "name": f"WH with Spill/Queue ({int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D'])})"},
+        {"value": int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D']), "name": f"High Cloud Services Days ({int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D'])})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 8,
+            "itemWidth": 12,
+            "textStyle": {"fontSize": 10}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#d62728", "#ff9896"],
+        "series": [{
+            "name": "WH Issues",
+            "type": "pie",
+            "radius": ["30%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 8},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
+
+
+def _render_warehouse_issues_rose_chart(row, key_prefix=""):
+    """Render warehouse issues rose chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D']), "name": "WH with Spill/Queue"},
+        {"value": int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D']), "name": "High Cloud Services Days"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 8,
+            "itemWidth": 12,
+            "textStyle": {"fontSize": 10}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#d62728", "#ff9896"],
+        "series": [{
+            "name": "WH Issues",
+            "type": "pie",
+            "radius": ["10%", "55%"],
+            "center": ["50%", "40%"],
+            "roseType": "area",
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+
+
+def _render_query_patterns_chart(row, key_prefix=""):
+    """Render query and usage patterns chart with selectable chart types."""
+    chart_type = st.selectbox(
+        "Change Chart Type",
+        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
+        index=0,
+        key=f"{key_prefix}chart_type"
+    )
+
+    if chart_type == "Bar Chart":
+        _render_query_patterns_bar_chart(row, key_prefix)
+    elif chart_type == "Pie Chart":
+        _render_query_patterns_pie_chart(row, key_prefix)
+    elif chart_type == "Pie - Donut":
+        _render_query_patterns_donut_chart(row, key_prefix)
+    else:
+        _render_query_patterns_rose_chart(row, key_prefix)
+
+
+def _render_query_patterns_bar_chart(row, key_prefix=""):
+    """Render query patterns bar chart using Plotly."""
+    categories = ['Short UPSERTs', 'Snowpark Queries']
+    values = [
+        int(row['NUM_SHORT_UPSERTS_LAST_30D']),
+        int(row['NUM_SNOWPARK_QUERIES_LAST_30D'])
+    ]
+
+    # Sort for horizontal bar layout
+    sorted_data = sorted(zip(values, categories), reverse=False)
+    values_sorted = [v for v, c in sorted_data]
+    categories_sorted = [c for v, c in sorted_data]
+
+    fig = go.Figure(data=[
+        go.Bar(
+            y=categories_sorted,
+            x=values_sorted,
+            orientation='h',
+            marker_color='#2ca02c',
+            text=[f"{int(val):,}" for val in values_sorted],
+            textposition='outside',
+            textfont=dict(size=10),
+            hovertemplate='<b>%{y}</b><br>Count: %{x:,}<extra></extra>'
+        )
+    ])
+
+    fig.update_layout(
+        height=400,
+        xaxis_title='Count',
+        yaxis_title='',
+        showlegend=False,
+        margin=dict(t=20, b=50, l=120, r=50)
+    )
+
+
+def _render_query_patterns_pie_chart(row, key_prefix=""):
+    """Render query patterns pie chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_SHORT_UPSERTS_LAST_30D']), "name": f"Short UPSERTs ({int(row['NUM_SHORT_UPSERTS_LAST_30D']):,})"},
+        {"value": int(row['NUM_SNOWPARK_QUERIES_LAST_30D']), "name": f"Snowpark Queries ({int(row['NUM_SNOWPARK_QUERIES_LAST_30D']):,})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 8,
+            "itemWidth": 12,
+            "textStyle": {"fontSize": 10}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#2ca02c", "#98df8a"],
+        "series": [{
+            "name": "Query Patterns",
+            "type": "pie",
+            "radius": ["0%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
+
+
+def _render_query_patterns_donut_chart(row, key_prefix=""):
+    """Render query patterns donut chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_SHORT_UPSERTS_LAST_30D']), "name": f"Short UPSERTs ({int(row['NUM_SHORT_UPSERTS_LAST_30D']):,})"},
+        {"value": int(row['NUM_SNOWPARK_QUERIES_LAST_30D']), "name": f"Snowpark Queries ({int(row['NUM_SNOWPARK_QUERIES_LAST_30D']):,})"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 8,
+            "itemWidth": 12,
+            "textStyle": {"fontSize": 10}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#2ca02c", "#98df8a"],
+        "series": [{
+            "name": "Query Patterns",
+            "type": "pie",
+            "radius": ["30%", "55%"],
+            "center": ["50%", "40%"],
+            "itemStyle": {"borderRadius": 8},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
+
+
+def _render_query_patterns_rose_chart(row, key_prefix=""):
+    """Render query patterns rose chart using ECharts."""
+    chart_data = [
+        {"value": int(row['NUM_SHORT_UPSERTS_LAST_30D']), "name": "Short UPSERTs"},
+        {"value": int(row['NUM_SNOWPARK_QUERIES_LAST_30D']), "name": "Snowpark Queries"}
+    ]
+
+    option = {
+        "legend": {
+            "bottom": "5",
+            "left": "center",
+            "orient": "horizontal",
+            "itemGap": 8,
+            "itemWidth": 12,
+            "textStyle": {"fontSize": 10}
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
+        "toolbox": {
+            "show": True,
+            "feature": {
+                "dataView": {"show": True, "readOnly": False},
+                "restore": {"show": True},
+                "saveAsImage": {"show": True}
+            }
+        },
+        "color": ["#2ca02c", "#98df8a"],
+        "series": [{
+            "name": "Query Patterns",
+            "type": "pie",
+            "radius": ["10%", "55%"],
+            "center": ["50%", "40%"],
+            "roseType": "area",
+            "itemStyle": {"borderRadius": 5},
+            "data": chart_data
+        }]
+    }
+
+    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
