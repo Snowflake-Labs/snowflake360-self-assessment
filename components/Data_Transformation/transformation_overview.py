@@ -1,7 +1,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from streamlit_echarts import st_echarts
+try:
+    from streamlit_echarts import st_echarts
+except ImportError:
+    def st_echarts(**kwargs):
+        import streamlit as st
+        st.info("Chart unavailable (echarts not supported in SiS)")
 from .problematic_query_report import comp_problematic_query_report
 from .syntax_hunter import comp_syntax_hunter
 from .object_structure_analysis import comp_object_structure_analysis

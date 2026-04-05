@@ -1,6 +1,11 @@
 import streamlit as st
 import pandas as pd
-from streamlit_echarts import st_echarts
+try:
+    from streamlit_echarts import st_echarts
+except ImportError:
+    def st_echarts(**kwargs):
+        import streamlit as st
+        st.info("Chart unavailable (echarts not supported in SiS)")
 from os.path import basename
 from components.local import setup_metric_entry
 from .scaling_management import comp_scaling_management

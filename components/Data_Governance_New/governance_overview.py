@@ -8,7 +8,12 @@ and Data Lineage & Quality.
 
 import streamlit as st
 import pandas as pd
-from streamlit_echarts import st_echarts
+try:
+    from streamlit_echarts import st_echarts
+except ImportError:
+    def st_echarts(**kwargs):
+        import streamlit as st
+        st.info("Chart unavailable (echarts not supported in SiS)")
 from .object_tagging_classification import comp_object_tagging_classification
 from .data_privacy_protection import comp_data_privacy_protection
 from .lineage_quality import comp_lineage_quality

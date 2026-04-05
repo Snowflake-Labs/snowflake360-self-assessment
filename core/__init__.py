@@ -1,10 +1,7 @@
-from . import config
-from .session_manager import get_current_session
+from .config import global_settings as config
 from .handle_catalog import load_catalog
-from .service import Service
 
 __all__ = [
-    'get_current_session',
+    'config',
     'load_catalog',
-    'Service'
 ]

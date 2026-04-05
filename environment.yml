@@ -3,5 +3,3 @@ channels:
   - snowflake
 dependencies:
   - plotly
-  - streamlit-extras
-  - streamlit_echarts

@@ -10,7 +10,12 @@ unprotected object detection, and SHARE-domain tag reference analytics
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from streamlit_echarts import st_echarts
+try:
+    from streamlit_echarts import st_echarts
+except ImportError:
+    def st_echarts(**kwargs):
+        import streamlit as st
+        st.info("Chart unavailable (echarts not supported in SiS)")
 
 
 def _rap_st_echarts(options, key, height="400px"):

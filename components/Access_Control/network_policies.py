@@ -7,7 +7,12 @@ and network rules audit.
 
 import streamlit as st
 import pandas as pd
-from streamlit_echarts import st_echarts
+try:
+    from streamlit_echarts import st_echarts
+except ImportError:
+    def st_echarts(**kwargs):
+        import streamlit as st
+        st.info("Chart unavailable (echarts not supported in SiS)")
 import plotly.graph_objects as go
 
 
