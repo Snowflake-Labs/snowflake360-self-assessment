@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 
 
 def comp_dcm_adoption(entry_actions=None):
@@ -45,20 +59,13 @@ def comp_dcm_adoption(entry_actions=None):
             ORDER BY 2 DESC
             """
 
-            # Display the query in terminal
-            print("=" * 100)
-            print("🔧 DDL DEPLOYMENT PATTERN ANALYSIS QUERY")
-            print("=" * 100)
-            print(f"🏢 ACCOUNT_ID: {account_id}")
-            print("=" * 100)
-            print(ddl_query)
-            print("=" * 100)
+
 
             try:
-                df = st.session_state.session.sql(ddl_query).to_pandas()
+                df = _cached_sql("rd_dcm_adoption", ddl_query)
             except Exception as e:
                 # st.error(f"Error executing query: {str(e)}")
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 return
@@ -81,7 +88,7 @@ def comp_dcm_adoption(entry_actions=None):
 
     except Exception as e:
         # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -91,68 +98,8 @@ def comp_dcm_adoption(entry_actions=None):
 # ============================
 
 def _render_ddl_table(df):
-    """Render DDL Pattern data table with Set Table and Add to Report buttons."""
-
-    # Create Report Category and Metric for DDL pattern analysis
-    ddl_category = ReportCategory('data_recovery_devops', 'Data Recovery & DevOps')
-    ddl_metric = ReportMetric('ddl_deployment_patterns', 'data_recovery_devops', 'DDL Deployment Pattern Analysis')
-
-    # Create a proper metric object for the dialogs
-    class DDLMetric:
-        def __init__(self, data):
-            self.display_data = data
-            self.display_data_copy = data.copy()
-            self.has_custom_columns = False
-
-    # Initialize DDL metric with data - this will persist across reruns
-    if 'ddl_metric_obj' not in st.session_state:
-        st.session_state.ddl_metric_obj = DDLMetric(df)
-    else:
-        # Update the data if it's changed, but preserve any column customizations
-        if not st.session_state.ddl_metric_obj.has_custom_columns:
-            st.session_state.ddl_metric_obj.display_data_copy = df.copy()
-            st.session_state.ddl_metric_obj.display_data = df
-
-    # Set dataframes for the report metric
-    ddl_metric.dataframes = [st.session_state.ddl_metric_obj.display_data]
-
-    # Create layout with buttons on top-right and table below
-    button_row_empty, button_row_col = st.columns([0.75, 0.25])
-
-    with button_row_col:
-        # Create buttons side by side
-        btn_col1, btn_col2 = st.columns(2)
-
-        with btn_col1:
-            # Gear icon button for "Set table" functionality
-            gear_clicked = st.button(
-                "Set Table", icon=":material/settings:",
-                key="ddl_config_gear_btn",
-                help="Customize table columns and rows",
-                type="secondary",
-                use_container_width=True
-            )
-            if gear_clicked:
-                _show_dialog(st.session_state.ddl_metric_obj, 'display_data', ddl_metric, None, None, None)
-
-        with btn_col2:
-            # Report icon button for "Add to report" functionality
-            metric_exists = ReportManager().metric_exists(ddl_metric.key)
-            report_clicked = st.button(
-                "Add to Report", icon=":material/add_circle:",
-                key="ddl_config_report_btn",
-                help="Add to report",
-                type="secondary",
-                use_container_width=True
-            )
-            if report_clicked:
-                show_metric_dialog(ddl_category, ddl_metric, metric_exists, False)
-
-    # Display the metric's display_data (this will be modified by the dialog)
-    st.dataframe(
-        st.session_state.ddl_metric_obj.display_data,
-        use_container_width=True
-    )
+    """Render DDL Pattern data table."""
+    st.dataframe(df, use_container_width=True)
 
 
 # ============================
@@ -164,11 +111,11 @@ def _render_ddl_charts(df):
 
     col1, col2 = st.columns(2)
 
-    with col1.container(border=True):
+    with col1.container():
         st.markdown("##### Execution Count by DDL Pattern")
         _render_execution_count_chart(df, key_prefix="exec_count_")
 
-    with col2.container(border=True):
+    with col2.container():
         st.markdown("##### Distinct Users by DDL Pattern")
         _render_distinct_users_chart(df, key_prefix="distinct_users_")
 
@@ -206,7 +153,7 @@ def _render_execution_count_bar_chart(df, key_prefix=""):
             y=plot_df['DDL_PATTERN'],
             x=plot_df['EXECUTION_COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{val:,}" for val in plot_df['EXECUTION_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -373,7 +320,7 @@ def _render_distinct_users_bar_chart(df, key_prefix=""):
             y=plot_df['DDL_PATTERN'],
             x=plot_df['DISTINCT_USERS'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#0077B6',
             text=[f"{val:,}" for val in plot_df['DISTINCT_USERS']],
             textposition='outside',
             textfont=dict(size=10),

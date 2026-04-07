@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_declarative_pipeline(entry_actions=None):
     """Declarative Pipeline Adoption (Dynamic Tables) Component
 
@@ -24,7 +38,7 @@ def comp_declarative_pipeline(entry_actions=None):
             from snowflake.snowpark.context import get_active_session
             session = get_active_session()
         except Exception as e:
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -66,9 +80,9 @@ def comp_declarative_pipeline(entry_actions=None):
 
             # Execute query
             try:
-                df = session.sql(query).to_pandas()
+                df = _cached_sql("rd_declarative_pipeline", query)
             except Exception as e:
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 return
@@ -90,7 +104,6 @@ def comp_declarative_pipeline(entry_actions=None):
             # Display the dataframe
             st.dataframe(
                 df,
-                hide_index=True
             )
 
             # Charts Section - 2 charts per row
@@ -100,16 +113,16 @@ def comp_declarative_pipeline(entry_actions=None):
             # Row 1: Two charts
             col1, col2 = st.columns(2)
 
-            with col1.container(border=True):
+            with col1.container():
                 st.markdown("##### Activity Count by Orchestration Type")
                 _render_activity_count_chart(df, key_prefix="activity_")
 
-            with col2.container(border=True):
+            with col2.container():
                 st.markdown("##### Declarative vs Imperative Distribution")
                 _render_distribution_chart(df, key_prefix="dist_")
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -143,7 +156,7 @@ def _render_activity_bar_chart(df, key_prefix=""):
     plot_df = df.sort_values('ACTIVITY_COUNT', ascending=True)
 
     # Define colors for declarative vs imperative
-    colors = ['#2ca02c' if 'Declarative' in t else '#1f77b4' for t in plot_df['ORCHESTRATION_TYPE']]
+    colors = ['#0077B6' if 'Declarative' in t else '#29B5E8' for t in plot_df['ORCHESTRATION_TYPE']]
 
     fig = go.Figure(data=[
         go.Bar(
@@ -192,7 +205,7 @@ def _render_activity_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#1f77b4"],
+        "color": ["#0077B6", "#29B5E8"],
         "series": [{
             "name": "Activity Count",
             "type": "pie",
@@ -231,7 +244,7 @@ def _render_activity_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#1f77b4"],
+        "color": ["#0077B6", "#29B5E8"],
         "series": [{
             "name": "Activity Count",
             "type": "pie",
@@ -270,7 +283,7 @@ def _render_activity_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#1f77b4"],
+        "color": ["#0077B6", "#29B5E8"],
         "series": [{
             "name": "Activity Count",
             "type": "pie",
@@ -317,7 +330,7 @@ def _render_dist_bar_chart(df, key_prefix=""):
     plot_df = plot_df.sort_values('PERCENTAGE', ascending=True)
 
     # Define colors for declarative vs imperative
-    colors = ['#2ca02c' if 'Declarative' in t else '#1f77b4' for t in plot_df['ORCHESTRATION_TYPE']]
+    colors = ['#0077B6' if 'Declarative' in t else '#29B5E8' for t in plot_df['ORCHESTRATION_TYPE']]
 
     fig = go.Figure(data=[
         go.Bar(
@@ -367,7 +380,7 @@ def _render_dist_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#1f77b4"],
+        "color": ["#0077B6", "#29B5E8"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -408,7 +421,7 @@ def _render_dist_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#1f77b4"],
+        "color": ["#0077B6", "#29B5E8"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -448,7 +461,7 @@ def _render_dist_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#1f77b4"],
+        "color": ["#0077B6", "#29B5E8"],
         "series": [{
             "name": "Distribution",
             "type": "pie",

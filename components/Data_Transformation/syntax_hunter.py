@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_syntax_hunter(entry_actions=None):
     """
     Syntax Hunter (Regex & Heuristics) Component
@@ -22,7 +36,7 @@ def comp_syntax_hunter(entry_actions=None):
             session = get_active_session()
         except Exception as e:
             # st.error(f"Unable to get Snowflake session: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -92,10 +106,10 @@ LIMIT 100
 
         # Execute query
         try:
-            df = session.sql(query).to_pandas()
+            df = _cached_sql("tf_syntax_hunter", query)
         except Exception as e:
             # st.error(f"Error executing query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -120,7 +134,6 @@ LIMIT 100
             # Display the dataframe
             st.dataframe(
                 df,
-                hide_index=True
             )
 
             # Charts Section
@@ -133,22 +146,22 @@ LIMIT 100
             # Row 1: Two charts
             col1, col2 = st.columns(2)
 
-            with col1.container(border=True):
+            with col1.container():
                 st.markdown("##### Pattern Usage Distribution")
                 _render_pattern_usage_chart(pattern_summary, key_prefix="pattern_usage_")
 
-            with col2.container(border=True):
+            with col2.container():
                 st.markdown("##### Queries by Pattern Type")
                 _render_pattern_queries_chart(pattern_summary, key_prefix="pattern_queries_")
 
             # Row 2: Two charts
             col3, col4 = st.columns(2)
 
-            with col3.container(border=True):
+            with col3.container():
                 st.markdown("##### DISTINCT Optimization Candidates")
                 _render_distinct_optimization_chart(df, key_prefix="distinct_opt_")
 
-            with col4.container(border=True):
+            with col4.container():
                 st.markdown("##### Pattern Detection Summary")
                 _render_pattern_summary_chart(pattern_summary, key_prefix="pattern_summary_")
 
@@ -227,10 +240,10 @@ ORDER BY occurrence_count DESC
 
         # Execute frequency query
         try:
-            freq_df = session.sql(frequency_query).to_pandas()
+            freq_df = _cached_sql("tf_syntax_frequency", frequency_query)
         except Exception as e:
             # st.error(f"Error executing frequency query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing frequency query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             freq_df = pd.DataFrame()
@@ -251,7 +264,6 @@ ORDER BY occurrence_count DESC
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section
@@ -261,28 +273,28 @@ ORDER BY occurrence_count DESC
                 # Row 1: Two charts
                 freq_col1, freq_col2 = st.columns(2)
 
-                with freq_col1.container(border=True):
+                with freq_col1.container():
                     st.markdown("##### Detection Type Occurrences")
                     _render_freq_occurrences_chart(freq_df, key_prefix="freq_occ_")
 
-                with freq_col2.container(border=True):
+                with freq_col2.container():
                     st.markdown("##### Pattern Distribution")
                     _render_freq_distribution_chart(freq_df, key_prefix="freq_dist_")
 
                 # Row 2: Two charts
                 freq_col3, freq_col4 = st.columns(2)
 
-                with freq_col3.container(border=True):
+                with freq_col3.container():
                     st.markdown("##### Inefficiency vs Feature Usage")
                     _render_freq_category_chart(freq_df, key_prefix="freq_cat_")
 
-                with freq_col4.container(border=True):
+                with freq_col4.container():
                     st.markdown("##### Top Patterns by Frequency")
                     _render_freq_top_patterns_chart(freq_df, key_prefix="freq_top_")
 
     except Exception as e:
         # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -339,7 +351,7 @@ def _render_pattern_usage_bar_chart(df, key_prefix=""):
             y=plot_df['Pattern'],
             x=plot_df['Count'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val)}" for val in plot_df['Count']],
             textposition='outside',
             textfont=dict(size=10),
@@ -513,7 +525,7 @@ def _render_pattern_queries_bar_chart(df, key_prefix=""):
     # Show all patterns (including zeros)
     plot_df = df.sort_values('Count', ascending=True)
 
-    colors = ['#2ca02c' if val > 0 else '#d3d3d3' for val in plot_df['Count']]
+    colors = ['#27AE60' if val > 0 else '#d3d3d3' for val in plot_df['Count']]
 
     fig = go.Figure(data=[
         go.Bar(
@@ -568,7 +580,7 @@ def _render_pattern_queries_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229"],
         "series": [{
             "name": "Pattern Queries",
             "type": "pie",
@@ -613,7 +625,7 @@ def _render_pattern_queries_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229"],
         "series": [{
             "name": "Pattern Queries",
             "type": "pie",
@@ -658,7 +670,7 @@ def _render_pattern_queries_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229"],
         "series": [{
             "name": "Pattern Queries",
             "type": "pie",
@@ -700,7 +712,7 @@ def _render_distinct_opt_bar_chart(df, key_prefix=""):
 
     categories = ['APPROX Candidates', 'No Optimization Needed']
     values = [candidates, non_candidates]
-    colors = ['#ff7f0e', '#2ca02c']
+    colors = ['#E8A229', '#27AE60']
 
     fig = go.Figure(data=[
         go.Bar(
@@ -752,7 +764,7 @@ def _render_distinct_opt_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c"],
+        "color": ["#E8A229", "#27AE60"],
         "series": [{
             "name": "DISTINCT Optimization",
             "type": "pie",
@@ -794,7 +806,7 @@ def _render_distinct_opt_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c"],
+        "color": ["#E8A229", "#27AE60"],
         "series": [{
             "name": "DISTINCT Optimization",
             "type": "pie",
@@ -836,7 +848,7 @@ def _render_distinct_opt_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c"],
+        "color": ["#E8A229", "#27AE60"],
         "series": [{
             "name": "DISTINCT Optimization",
             "type": "pie",
@@ -878,7 +890,7 @@ def _render_pattern_sum_bar_chart(df, key_prefix=""):
 
     categories = ['Patterns Detected', 'Patterns Not Found']
     values = [detected, not_detected]
-    colors = ['#9467bd', '#d3d3d3']
+    colors = ['#0077B6', '#d3d3d3']
 
     fig = go.Figure(data=[
         go.Bar(
@@ -930,7 +942,7 @@ def _render_pattern_sum_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#d3d3d3"],
+        "color": ["#0077B6", "#d3d3d3"],
         "series": [{
             "name": "Pattern Summary",
             "type": "pie",
@@ -972,7 +984,7 @@ def _render_pattern_sum_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#d3d3d3"],
+        "color": ["#0077B6", "#d3d3d3"],
         "series": [{
             "name": "Pattern Summary",
             "type": "pie",
@@ -1014,7 +1026,7 @@ def _render_pattern_sum_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#d3d3d3"],
+        "color": ["#0077B6", "#d3d3d3"],
         "series": [{
             "name": "Pattern Summary",
             "type": "pie",
@@ -1061,7 +1073,7 @@ def _render_freq_occ_bar_chart(df, key_prefix=""):
             y=plot_df['DETECTION_TYPE'],
             x=plot_df['OCCURRENCE_COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val):,}" for val in plot_df['OCCURRENCE_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1246,7 +1258,7 @@ def _render_freq_dist_bar_chart(df, key_prefix=""):
             y=plot_df['DETECTION_TYPE'],
             x=plot_df['PERCENTAGE'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{val:.1f}%" for val in plot_df['PERCENTAGE']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1294,7 +1306,7 @@ def _render_freq_dist_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -1340,7 +1352,7 @@ def _render_freq_dist_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -1386,7 +1398,7 @@ def _render_freq_dist_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -1431,7 +1443,7 @@ def _render_freq_cat_bar_chart(df, key_prefix=""):
 
     categories = ['⚠️ Potential Inefficiencies', '✅ Advanced Features']
     values = [inefficiency_count, feature_count]
-    colors = ['#d62728', '#2ca02c']
+    colors = ['#E74C3C', '#27AE60']
 
     fig = go.Figure(data=[
         go.Bar(
@@ -1486,7 +1498,7 @@ def _render_freq_cat_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#d62728", "#2ca02c"],
+        "color": ["#E74C3C", "#27AE60"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -1531,7 +1543,7 @@ def _render_freq_cat_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#d62728", "#2ca02c"],
+        "color": ["#E74C3C", "#27AE60"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -1576,7 +1588,7 @@ def _render_freq_cat_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#d62728", "#2ca02c"],
+        "color": ["#E74C3C", "#27AE60"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -1624,7 +1636,7 @@ def _render_freq_top_bar_chart(df, key_prefix=""):
             y=plot_df['DETECTION_TYPE'],
             x=plot_df['OCCURRENCE_COUNT'],
             orientation='h',
-            marker_color='#9467bd',
+            marker_color='#0077B6',
             text=[f"{int(val):,}" for val in plot_df['OCCURRENCE_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1672,7 +1684,7 @@ def _render_freq_top_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
         "series": [{
             "name": "Top Patterns",
             "type": "pie",
@@ -1717,7 +1729,7 @@ def _render_freq_top_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
         "series": [{
             "name": "Top Patterns",
             "type": "pie",
@@ -1762,7 +1774,7 @@ def _render_freq_top_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
         "series": [{
             "name": "Top Patterns",
             "type": "pie",

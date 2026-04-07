@@ -18,6 +18,10 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _get_cached(cache_key):
+    return st.session_state.get(cache_key, pd.DataFrame())
+
+
 def _rap_st_echarts(options, key, height="400px"):
     """Render ECharts with SVG renderer (reliable default paint in Streamlit-in-Snowflake).
 
@@ -62,21 +66,21 @@ def _render_rap_kpi_tiles(total_policies, total_protected, policies_per_obj, obj
     """
     st.markdown(f"""
     <div style="display: flex; gap: 16px; padding: 10px 0;">
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f4ff 0%, #e8eeff 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f7fb 0%, #f0f7fb 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Total Policies</div>
-            <div style="font-size: 36px; font-weight: 700; color: #1f77b4; line-height: 1;">{total_policies:,}</div>
+            <div style="font-size: 36px; font-weight: 700; color: #29B5E8; line-height: 1;">{total_policies:,}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0fff0 0%, #e0ffe0 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #EAF8F0 0%, #EAF8F0 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Protected Objects</div>
-            <div style="font-size: 36px; font-weight: 700; color: #2ca02c; line-height: 1;">{total_protected:,}</div>
+            <div style="font-size: 36px; font-weight: 700; color: #27AE60; line-height: 1;">{total_protected:,}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #fff4e6 0%, #ffedcc 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #fff3cd 0%, #fff3cd 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Policies / Object</div>
-            <div style="font-size: 36px; font-weight: 700; color: #ff7f0e; line-height: 1;">{policies_per_obj}</div>
+            <div style="font-size: 36px; font-weight: 700; color: #E8A229; line-height: 1;">{policies_per_obj}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #f5f0ff 0%, #ebe0ff 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f7fb 0%, #f0f7fb 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Objects / Policy</div>
-            <div style="font-size: 36px; font-weight: 700; color: #9467bd; line-height: 1;">{objects_per_policy}</div>
+            <div style="font-size: 36px; font-weight: 700; color: #0077B6; line-height: 1;">{objects_per_policy}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -105,7 +109,7 @@ def _rap_horizontal_bar_plotly(categories, values, y_axis_title, key):
                 y=df_sorted["CAT"],
                 x=df_sorted["VAL"],
                 orientation="h",
-                marker_color="#1f77b4",
+                marker_color="#29B5E8",
                 text=df_sorted["VAL"],
                 textposition="outside",
                 textfont=dict(size=10),
@@ -319,7 +323,7 @@ def _rap_schema_level_panel(schema_df):
         "visualMap": {
             "min": 0, "max": max_val, "calculable": True,
             "orient": "horizontal", "left": "center", "bottom": "0",
-            "inRange": {"color": ["#e0f3db", "#a8ddb5", "#43a2ca", "#0868ac"]}
+            "inRange": {"color": ["#CAF0F8", "#75C2D8", "#29B5E8", "#0077B6"]}
         },
         "series": [{
             "name": "Protected Objects",
@@ -444,32 +448,32 @@ def _render_dcr_kpi_tiles(
         distinct_tag_names: Count of distinct TAG_NAME values
         consistency_score: 0–100 score from dispersion of tags per object
     """
-    cov_color = "#2ca02c" if tag_coverage_pct >= 70 else "#ff7f0e" if tag_coverage_pct >= 40 else "#d62728"
+    cov_color = "#0077B6" if tag_coverage_pct >= 70 else "#E8A229" if tag_coverage_pct >= 40 else "#E74C3C"
     st.markdown(f"""
     <div style="display: flex; flex-wrap: wrap; gap: 16px; padding: 10px 0;">
-        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f4ff 0%, #e8eeff 100%); border-radius: 12px;">
+        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f7fb 0%, #f0f7fb 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tagged SHARE objects</div>
-            <div style="font-size: 32px; font-weight: 700; color: #1f77b4; line-height: 1;">{distinct_objects:,}</div>
+            <div style="font-size: 32px; font-weight: 700; color: #29B5E8; line-height: 1;">{distinct_objects:,}</div>
         </div>
-        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0fff0 0%, #e0ffe0 100%); border-radius: 12px;">
+        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #EAF8F0 0%, #EAF8F0 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tag coverage %</div>
             <div style="font-size: 32px; font-weight: 700; color: {cov_color}; line-height: 1;">{tag_coverage_pct:.1f}%</div>
         </div>
-        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #fff4e6 0%, #ffedcc 100%); border-radius: 12px;">
+        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #fff3cd 0%, #fff3cd 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Automation rate %</div>
-            <div style="font-size: 32px; font-weight: 700; color: #ff7f0e; line-height: 1;">{automation_rate_pct:.1f}%</div>
+            <div style="font-size: 32px; font-weight: 700; color: #E8A229; line-height: 1;">{automation_rate_pct:.1f}%</div>
         </div>
-        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #f5f0ff 0%, #ebe0ff 100%); border-radius: 12px;">
+        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f7fb 0%, #f0f7fb 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Avg tags / object</div>
-            <div style="font-size: 32px; font-weight: 700; color: #9467bd; line-height: 1;">{avg_tags_per_object:.2f}</div>
+            <div style="font-size: 32px; font-weight: 700; color: #0077B6; line-height: 1;">{avg_tags_per_object:.2f}</div>
         </div>
-        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #e8f4f8 0%, #d4e8f0 100%); border-radius: 12px;">
+        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f7fb 0%, #f0f7fb 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Distinct tag names</div>
-            <div style="font-size: 32px; font-weight: 700; color: #17becf; line-height: 1;">{distinct_tag_names:,}</div>
+            <div style="font-size: 32px; font-weight: 700; color: #00B4D8; line-height: 1;">{distinct_tag_names:,}</div>
         </div>
-        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #fff0f5 0%, #ffe4ec 100%); border-radius: 12px;">
+        <div style="flex: 1 1 160px; min-width: 150px; text-align: left; padding: 18px; background: linear-gradient(135deg, #FDEDEC 0%, #FDEDEC 100%); border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tag consistency score</div>
-            <div style="font-size: 32px; font-weight: 700; color: #e377c2; line-height: 1;">{consistency_score:.0f}</div>
+            <div style="font-size: 32px; font-weight: 700; color: #75C2D8; line-height: 1;">{consistency_score:.0f}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -483,31 +487,15 @@ def _render_data_clean_room_provider_content():
 
     Args:
     """
-    share_tag_query = """
-    SELECT
-        TAG_DATABASE,
-        TAG_SCHEMA,
-        TAG_NAME,
-        TAG_VALUE,
-        OBJECT_DATABASE,
-        OBJECT_SCHEMA,
-        OBJECT_NAME,
-        DOMAIN,
-        APPLY_METHOD
-    FROM SNOWFLAKE.ACCOUNT_USAGE.TAG_REFERENCES
-    WHERE DOMAIN = 'SHARE'
-        AND OBJECT_DELETED IS NULL
-"""
-
     key_suffix = "dcr"
 
     try:
-        raw_df = st.session_state.session.sql(share_tag_query).to_pandas()
+        raw_df = _get_cached("dg_share_tag")
         df = _dcr_normalize_columns(raw_df)
 
         if len(df) == 0:
             _render_dcr_kpi_tiles(0, 0.0, 0.0, 0.0, 0, 0.0)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;No SHARE-domain tag references for this account and execution.'
                         '</div>', unsafe_allow_html=True)
             return
@@ -545,7 +533,7 @@ def _render_data_clean_room_provider_content():
         # --- Charts 2–7: two columns per row ---
         # 2. Tag usage
         row1a, row1b = st.columns(2)
-        with row1a.container(border=True, height=720):
+        with row1a.container():
             name_counts = (
                 df.groupby("TAG_NAME", dropna=False)
                 .size()
@@ -579,13 +567,13 @@ def _render_data_clean_room_provider_content():
                 y_axis_title="TAG_NAME",
             )
 
-        with row1b.container(border=True, height=720):
+        with row1b.container():
             st.markdown("##### Tag value distribution")
             tag_names_sorted = sorted(
                 df["TAG_NAME"].dropna().astype(str).unique().tolist()
             )
             if not tag_names_sorted:
-                st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             'ℹ️&nbsp;&nbsp;No TAG_NAME values to analyze.'
                             '</div>', unsafe_allow_html=True)
             else:
@@ -623,7 +611,7 @@ def _render_data_clean_room_provider_content():
                 )
 
         row2a, row2b = st.columns(2)
-        with row2a.container(border=True, height=720):
+        with row2a.container():
             dim = st.selectbox(
                 "Aggregate tags by",
                 ["OBJECT_DATABASE", "OBJECT_SCHEMA", "OBJECT_NAME (full)"],
@@ -666,7 +654,7 @@ def _render_data_clean_room_provider_content():
                 f"Under-tagged objects (≤1 tag row): {len(low_tag):,} of {distinct_objects:,} distinct objects"
             )
 
-        with row2b.container(border=True, height=720):
+        with row2b.container():
             apply_grp = buckets.value_counts(dropna=False).reset_index()
             apply_grp.columns = ["BUCKET", "CNT"]
             order = ["Manual", "Inherited", "Automated", "Other", "Unknown"]
@@ -683,7 +671,7 @@ def _render_data_clean_room_provider_content():
             )
 
         row3a, row3b = st.columns(2)
-        with row3a.container(border=True, height=720):
+        with row3a.container():
             st.markdown("##### Account-level governance")
             st.caption(
                 "Single execution snapshot — cross-account and time-trend views need "
@@ -702,7 +690,7 @@ def _render_data_clean_room_provider_content():
                 y_axis_title="Tags per object",
             )
 
-        with row3b.container(border=True, height=720):
+        with row3b.container():
             cls_rows = []
             for obj_key, g in df.groupby("_OBJ_KEY", sort=False):
                 parts = (
@@ -736,7 +724,7 @@ def _render_data_clean_room_provider_content():
 
     except Exception as e:
         st.markdown(
-            f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
             f"🛑&nbsp;&nbsp;Error loading SHARE tag analytics: {str(e)}"
             f"</div>",
             unsafe_allow_html=True,
@@ -758,51 +746,14 @@ def _render_rap_audit_content():
 
     Args:
     """
-    rap_query = """
-    SELECT
-        POLICY_DB,
-        POLICY_SCHEMA,
-        POLICY_NAME,
-        REF_DATABASE_NAME AS PROTECTED_DB,
-        REF_SCHEMA_NAME AS PROTECTED_SCHEMA,
-        REF_ENTITY_NAME AS PROTECTED_TABLE,
-        REF_ENTITY_DOMAIN AS OBJECT_TYPE
-    FROM SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES
-    WHERE POLICY_KIND = 'ROW_ACCESS_POLICY'
-        AND POLICY_STATUS = 'ACTIVE'
-        AND POLICY_DB != 'SNOWFLAKE'
-ORDER BY POLICY_DB, POLICY_NAME
-    """
-
-    unprotected_query = """
-    SELECT t.TABLE_CATALOG AS DATABASE_NAME,
-           t.TABLE_SCHEMA AS SCHEMA_NAME,
-           t.TABLE_NAME
-    FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES t
-    LEFT JOIN (
-        SELECT DISTINCT REF_DATABASE_NAME, REF_SCHEMA_NAME, REF_ENTITY_NAME
-        FROM SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES
-        WHERE POLICY_KIND = 'ROW_ACCESS_POLICY'
-            AND POLICY_STATUS = 'ACTIVE'
-            AND POLICY_DB != 'SNOWFLAKE'
-) rap ON t.TABLE_CATALOG = rap.REF_DATABASE_NAME
-        AND t.TABLE_SCHEMA = rap.REF_SCHEMA_NAME
-        AND t.TABLE_NAME = rap.REF_ENTITY_NAME
-    WHERE rap.REF_ENTITY_NAME IS NULL
-        AND t.DELETED IS NULL
-        AND t.TABLE_CATALOG NOT IN ('SNOWFLAKE', 'SNOWFLAKE_SAMPLE_DATA')
-        AND t.TABLE_SCHEMA != 'INFORMATION_SCHEMA'
-ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
-    """
-
     try:
-        rap_df = st.session_state.session.sql(rap_query).to_pandas()
-        unprotected_df = st.session_state.session.sql(unprotected_query).to_pandas()
+        rap_df = _get_cached("dg_rap")
+        unprotected_df = _get_cached("dg_unprotected")
 
         # --- 1. KPI Metrics ---
         if len(rap_df) == 0:
             _render_rap_kpi_tiles(0, 0, 0, 0)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;No active Row Access Policies found for this account.'
                         '</div>', unsafe_allow_html=True)
             return
@@ -821,7 +772,7 @@ ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
         # --- 2. Policies by Database  |  3. Object Type Distribution ---
         col1, col2 = st.columns(2)
 
-        with col1.container(border=True, height=550):
+        with col1.container():
             db_counts = (
                 rap_df.groupby('POLICY_DB')['POLICY_NAME']
                 .nunique()
@@ -838,7 +789,7 @@ ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
                 y_axis_title="Database",
             )
 
-        with col2.container(border=True, height=550):
+        with col2.container():
             type_counts = (
                 rap_df.groupby('OBJECT_TYPE')
                 .size()
@@ -858,7 +809,7 @@ ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
         # --- 4. Top 10 Policies by Usage  |  5. Schema-Level Heatmap ---
         col3, col4 = st.columns(2)
 
-        with col3.container(border=True, height=550):
+        with col3.container():
             policy_usage = (
                 rap_df.groupby('POLICY_NAME')
                 .size()
@@ -875,7 +826,7 @@ ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
                 y_axis_title="Policy",
             )
 
-        with col4.container(border=True, height=550):
+        with col4.container():
             schema_counts = (
                 rap_df.groupby(['PROTECTED_DB', 'PROTECTED_SCHEMA'])
                 .size()
@@ -885,14 +836,14 @@ ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
                 _rap_schema_level_panel(schema_counts)
             else:
                 st.markdown("#### Schema-Level Heatmap: 0")
-                st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             'ℹ️&nbsp;&nbsp;No schema-level data available for heatmap.'
                             '</div>', unsafe_allow_html=True)
 
         # --- 6. Top 10 Tables by Usage  |  7. Unprotected Objects ---
         col5, col6 = st.columns(2)
 
-        with col5.container(border=True, height=550):
+        with col5.container():
             table_usage = rap_df.copy()
             table_usage['FULL_TABLE'] = (
                 table_usage['PROTECTED_DB'] + '.' +
@@ -915,11 +866,11 @@ ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
                 y_axis_title="Table",
             )
 
-        with col6.container(border=True, height=550):
+        with col6.container():
             unprotected_count = len(unprotected_df)
             if unprotected_count == 0:
                 st.markdown("#### Unprotected Objects: 0")
-                st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             '✅&nbsp;&nbsp;All tables have Row Access Policy protection.'
                             '</div>', unsafe_allow_html=True)
             else:
@@ -943,7 +894,7 @@ ORDER BY t.TABLE_CATALOG, t.TABLE_SCHEMA, t.TABLE_NAME
                 st.dataframe(display_df, use_container_width=True, height=220)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading RAP audit: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -967,17 +918,15 @@ def comp_data_privacy_protection(entry_actions=None):
     try:
         st.markdown("### Data Privacy & Protection")
 
-        with st.expander("Masking Policy Coverage", expanded=False):
+        with st.expander("Masking Policy Coverage", expanded=True):
             st.markdown("#### Masking Policy Coverage")
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        'ℹ️&nbsp;&nbsp;Content for Masking Policy Coverage will be implemented here.'
-                        '</div>', unsafe_allow_html=True)
+            _render_masking_policy_coverage()
 
         with st.expander("Row Access Policy (RAP) Audit", expanded=True):
             st.markdown("#### Row Access Policy (RAP) Audit")
             _render_rap_audit_content()
 
-        with st.expander("Data Clean Room / Provider Usage", expanded=False):
+        with st.expander("Data Clean Room / Provider Usage", expanded=True):
             st.markdown("#### Data Clean Room / Provider Usage")
             st.caption(
                 "Metrics and charts from TAG_REFERENCES where DOMAIN = 'SHARE' "
@@ -985,7 +934,160 @@ def comp_data_privacy_protection(entry_actions=None):
             )
             _render_data_clean_room_provider_content()
 
+        with st.expander("Dangling Policies (Policies on Dropped Objects)", expanded=True):
+            _render_dangling_policies()
+
+        with st.expander("Masking Policy Design Patterns", expanded=True):
+            _render_masking_design_patterns()
+
+        with st.expander("Downstream Untagged/Unmasked Columns", expanded=True):
+            _render_downstream_untagged()
+
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading Data Privacy & Protection: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
+
+
+def _render_masking_policy_coverage():
+    import plotly.graph_objects as go
+    import pandas as pd
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Masking Policy Coverage:</b> Columns identified as sensitive (by tag) or '
+        'already protected by an active masking policy. Unprotected sensitive columns represent '
+        'governance gaps where masking policies should be added.</div>', unsafe_allow_html=True)
+    try:
+        df = _get_cached("dg_masking_coverage")
+        if df.empty:
+            st.info("No sensitive or masked columns found. Apply PII/PHI tags or masking policies to see coverage analysis.")
+            return
+        status_counts = df['PROTECTION_STATUS'].value_counts().reset_index()
+        status_counts.columns = ['status', 'count']
+        col1, col2, col3 = st.columns(3)
+        protected = len(df[df['PROTECTION_STATUS'].str.startswith('Protected')])
+        unprotected = len(df[df['PROTECTION_STATUS'].str.startswith('UNPROTECTED')])
+        masked_only = len(df[df['PROTECTION_STATUS'].str.startswith('Masked')])
+        with col1:
+            st.metric("Total Sensitive Columns", len(df))
+        with col2:
+            st.metric("Unprotected (Gap)", unprotected)
+        with col3:
+            coverage_pct = (protected / len(df) * 100) if len(df) > 0 else 0
+            st.metric("Coverage %", f"{coverage_pct:.1f}%")
+        _status_colors = {
+            'Protected (Tag + Mask)': '#29B5E8',
+            'Masked (No Sensitive Tag)': '#75C2D8',
+            'UNPROTECTED - Sensitive but No Mask': '#F39C12'
+        }
+        fig = go.Figure(go.Pie(
+            labels=status_counts['status'],
+            values=status_counts['count'],
+            hole=0.3,
+            marker_colors=[_status_colors.get(s, '#E8A229') for s in status_counts['status']]
+        ))
+        fig.update_layout(title='Masking Policy Coverage Status', height=340, margin=dict(t=50, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+        unprotected_df = df[df['PROTECTION_STATUS'].str.startswith('UNPROTECTED')]
+        if not unprotected_df.empty:
+            st.markdown("**Unprotected Sensitive Columns (Governance Gaps)**")
+            st.dataframe(unprotected_df[['DATABASE_NAME', 'SCHEMA_NAME', 'TABLE_NAME', 'COLUMN_NAME', 'PROTECTION_STATUS']])
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+
+
+def _render_dangling_policies():
+    import plotly.graph_objects as go
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Dangling Policies:</b> Active policy references where the protected object or '
+        'the policy database no longer exists in ACCOUNT_USAGE.TABLES.</div>',
+        unsafe_allow_html=True)
+    try:
+        df = _get_cached("dg_dangling_policies")
+        if df.empty:
+            st.success("No dangling policies detected — all policies reference active objects.")
+            return
+        st.metric("Potentially Dangling Policy References", len(df))
+        kind_counts = df.groupby('POLICY_KIND').size().reset_index(name='COUNT').sort_values('COUNT', ascending=False)
+        colors = ['#29B5E8', '#11567F', '#75C2D8', '#E8A229']
+        fig = go.Figure(go.Bar(
+            x=kind_counts['POLICY_KIND'], y=kind_counts['COUNT'],
+            marker_color=colors[:len(kind_counts)],
+            text=kind_counts['COUNT'], textposition='outside'
+        ))
+        fig.update_layout(title='Dangling Policies by Type', yaxis_title='Count', height=340, margin=dict(t=50, b=60))
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df)
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+
+
+def _render_masking_design_patterns():
+    import plotly.graph_objects as go
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Masking Policy Design:</b> Distribution of masking policies by the number of '
+        'tables/columns they protect. Policies protecting many objects may indicate good reuse; policies '
+        'protecting only 1 object may be overly specific.</div>',
+        unsafe_allow_html=True)
+    try:
+        df = _get_cached("dg_masking_design")
+        if df.empty:
+            st.info("No masking policies found.")
+            return
+        for c in ['TABLES_PROTECTED', 'COLUMNS_PROTECTED', 'TOTAL_REFERENCES']:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Masking Policies", len(df))
+        with col2:
+            single_use = len(df[df['TABLES_PROTECTED'] <= 1])
+            st.metric("Single-Table Policies", single_use)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name='Tables Protected', x=df['POLICY_NAME'], y=df['TABLES_PROTECTED'], marker_color='#29B5E8'))
+        fig.add_trace(go.Bar(name='Columns Protected', x=df['POLICY_NAME'], y=df['COLUMNS_PROTECTED'], marker_color='#11567F'))
+        fig.update_layout(
+            barmode='group', title='Masking Policy Reuse Patterns',
+            yaxis_title='Count', height=380, margin=dict(t=50, b=100),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df)
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+
+
+def _render_downstream_untagged():
+    import plotly.graph_objects as go
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Downstream Untagged/Unmasked:</b> Columns tagged as PII or sensitive that lack '
+        'a masking policy. These represent data protection gaps.</div>',
+        unsafe_allow_html=True)
+    try:
+        df = _get_cached("dg_downstream_unmasked")
+        if df.empty:
+            st.success("All sensitive/PII-tagged columns have masking policies applied.")
+            return
+        st.metric("Unmasked Sensitive Columns", len(df))
+        db_counts = df.groupby('DATABASE_NAME').size().reset_index(name='COUNT').sort_values('COUNT', ascending=False)
+        colors = ['#29B5E8', '#11567F', '#75C2D8', '#E8A229', '#1A7DA8', '#023E8A']
+        fig = go.Figure(go.Bar(
+            x=db_counts['DATABASE_NAME'], y=db_counts['COUNT'],
+            marker_color=colors[:len(db_counts)],
+            text=db_counts['COUNT'], textposition='outside'
+        ))
+        fig.update_layout(
+            title='Unmasked Sensitive Columns by Database',
+            yaxis_title='Count', height=360, margin=dict(t=50, b=80)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown(
+            '<div style="background-color:#fff3cd;border-left:6px solid #F39C12;padding:10px;">'
+            '⚠️&nbsp;&nbsp;These columns are tagged as sensitive/PII but lack masking policies. '
+            'Consider applying tag-based masking for automated protection.</div>',
+            unsafe_allow_html=True)
+        st.dataframe(df)
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)

@@ -6,8 +6,7 @@ recommendations via SNOWFLAKE.CORTEX.AI_COMPLETE().
 
 import streamlit as st
 import json
-
-AVAILABLE_MODELS = ["claude-3-7-sonnet", "llama3.1-70b", "mistral-large2"]
+from core.config.design_tokens import BRAND_PRIMARY, TEXT_HEADING
 
 
 def _call_cortex(session, model_name, prompt):
@@ -20,7 +19,16 @@ def _call_cortex(session, model_name, prompt):
             ) AS RESPONSE
         """).collect()
         if result and len(result) > 0:
-            return result[0]['RESPONSE']
+            raw = result[0]['RESPONSE']
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    raw = parsed.get("choices", [{}])[0].get("messages", raw) if "choices" in parsed else parsed.get("message", parsed.get("content", raw))
+                    if isinstance(raw, dict):
+                        raw = raw.get("content", str(raw))
+            except (json.JSONDecodeError, TypeError, KeyError, IndexError):
+                pass
+            return str(raw)
         return "No response from Cortex"
     except Exception as e:
         return f"Error calling Cortex: {str(e)}"
@@ -108,6 +116,85 @@ def _gather_data(session):
     return "\n\n".join(sections) if sections else "No data could be gathered."
 
 
+def _gather_individual_data(session, role_name):
+    sections = []
+
+    try:
+        rows = session.sql(f"""
+            SELECT PRIVILEGE, GRANTED_ON, NAME AS OBJECT_NAME,
+                   GRANT_OPTION, GRANTED_BY
+            FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
+            WHERE GRANTEE_NAME = '{role_name}'
+              AND DELETED_ON IS NULL
+            ORDER BY GRANTED_ON, PRIVILEGE
+            LIMIT 30
+        """).collect()
+        if rows:
+            lines = [f"GRANTS TO ROLE {role_name} (top 30):"]
+            for r in rows:
+                lines.append(f"  {r['PRIVILEGE']} ON {r['GRANTED_ON']} {r['OBJECT_NAME']} "
+                             f"(grant_option={r['GRANT_OPTION']}, by={r['GRANTED_BY']})")
+            sections.append("\n".join(lines))
+        else:
+            sections.append(f"GRANTS TO ROLE: No grants found for {role_name}")
+    except Exception as e:
+        sections.append(f"GRANTS TO ROLE: Error - {e}")
+
+    try:
+        rows = session.sql(f"""
+            SELECT GRANTEE_NAME AS CHILD_ROLE, GRANTED_BY
+            FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
+            WHERE NAME = '{role_name}'
+              AND PRIVILEGE = 'USAGE'
+              AND GRANTED_ON = 'ROLE'
+              AND DELETED_ON IS NULL
+        """).collect()
+        if rows:
+            lines = [f"ROLES GRANTED {role_name}:"]
+            for r in rows:
+                lines.append(f"  {r['CHILD_ROLE']} (by={r['GRANTED_BY']})")
+            sections.append("\n".join(lines))
+    except Exception as e:
+        sections.append(f"ROLE GRANTS: Error - {e}")
+
+    try:
+        rows = session.sql(f"""
+            SELECT GRANTEE_NAME AS USER_NAME
+            FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_USERS
+            WHERE ROLE = '{role_name}'
+              AND DELETED_ON IS NULL
+            ORDER BY GRANTEE_NAME
+            LIMIT 20
+        """).collect()
+        if rows:
+            users = [r['USER_NAME'] for r in rows]
+            sections.append(f"USERS WITH ROLE ({len(users)}): {', '.join(users)}")
+        else:
+            sections.append(f"USERS WITH ROLE: No users assigned to {role_name}")
+    except Exception as e:
+        sections.append(f"USERS WITH ROLE: Error - {e}")
+
+    try:
+        rows = session.sql(f"""
+            SELECT PRIVILEGE, COUNT(*) AS CNT
+            FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
+            WHERE GRANTEE_NAME = '{role_name}'
+              AND DELETED_ON IS NULL
+            GROUP BY PRIVILEGE
+            ORDER BY CNT DESC
+            LIMIT 10
+        """).collect()
+        if rows:
+            lines = ["PRIVILEGE DISTRIBUTION:"]
+            for r in rows:
+                lines.append(f"  {r['PRIVILEGE']}: {r['CNT']}")
+            sections.append("\n".join(lines))
+    except Exception as e:
+        sections.append(f"PRIVILEGE DISTRIBUTION: Error - {e}")
+
+    return "\n\n".join(sections) if sections else "No data could be gathered."
+
+
 def comp_access_control_analysis(entry_actions=None):
     st.markdown("### Access Control Analyzer")
     st.markdown("AI-powered analysis of your authentication, authorization, and security posture.")
@@ -117,28 +204,126 @@ def comp_access_control_analysis(entry_actions=None):
         st.warning("No active Snowflake session found.")
         return
 
-    col1, col2 = st.columns([3, 1])
-    with col2:
-        model = st.selectbox("Cortex Model", AVAILABLE_MODELS, key="access_control_model")
+    model = st.session_state.get("selected_llm", "claude-3-7-sonnet")
 
-    cache_key = "access_control_analysis_result"
+    tab_summary, tab_individual = st.tabs(["Summary Analysis", "Individual Role Analysis"])
 
-    if st.button("Run Analysis", type="primary", key="access_control_run_btn"):
-        with st.spinner("Gathering access control data and running AI analysis..."):
+    with tab_summary:
+        cache_key = "access_control_analysis_result"
+
+        if cache_key not in st.session_state:
+            status_text = st.empty()
+            progress_bar = st.empty()
+            status_text.text("Gathering data...")
+            progress_bar_widget = progress_bar.progress(0)
+            progress_bar_widget.progress(0.3)
             data_summary = _gather_data(session)
+            status_text.text("Running AI analysis...")
+            progress_bar_widget.progress(0.7)
+            with st.spinner("Running AI analysis..."):
+                prompt = (
+                    "You are a Snowflake expert specializing in access control, security, and identity management. "
+                    "Analyze the following access control data from SNOWFLAKE.ACCOUNT_USAGE views. "
+                    "Format your response using proper Markdown with ## headers, bullet points (- or *), and bold text (**). "
+                    "Provide:\n"
+                    "1. **Summary Assessment**: Overall security posture\n"
+                    "2. **Key Findings**: Authentication risks, authorization gaps, privilege concerns\n"
+                    "3. **Recommendations**: Specific steps to harden access controls\n"
+                    "4. **Risk Areas**: MFA gaps, orphan roles, excessive privileges, login anomalies\n\n"
+                    f"DATA:\n{data_summary}"
+                )
+                result = _call_cortex(session, model, prompt)
+                st.session_state[cache_key] = result
+            progress_bar.empty()
+            status_text.empty()
+
+        if cache_key in st.session_state:
+            st.markdown("---")
+            raw_text = st.session_state[cache_key]
+            if isinstance(raw_text, str) and raw_text.startswith('"') and raw_text.endswith('"'):
+                raw_text = raw_text[1:-1]
+            clean_text = raw_text.replace("\\n", "\n").replace("\\t", "  ")
+            st.markdown(clean_text)
+
+    with tab_individual:
+        entity_cache = "ac_entity_list"
+        if entity_cache not in st.session_state:
+            try:
+                rows = session.sql("SELECT NAME AS ROLE_NAME FROM SNOWFLAKE.ACCOUNT_USAGE.ROLES WHERE DELETED_ON IS NULL ORDER BY NAME").collect()
+                st.session_state[entity_cache] = [r[0] for r in rows] if rows else []
+            except Exception:
+                st.session_state[entity_cache] = []
+
+        entities = st.session_state[entity_cache]
+        if not entities:
+            st.info("No roles found.")
+            return
+
+        selected = st.selectbox("Role Name", entities, key="ac_entity_select")
+
+        if st.button("Analyze", key="ac_indiv_btn", type="secondary"):
+            indiv_key = f"ac_indiv_{selected}"
+            _prog = st.progress(0)
+            _stat = st.empty()
+            _stat.markdown('<p style="color: #003D73; font-weight: 600;">Gathering data...</p>', unsafe_allow_html=True)
+            _prog.progress(30)
+            data_summary = _gather_individual_data(session, selected)
+
+            try:
+                grant_rows = session.sql(f"""
+                    SELECT COUNT(*) AS GRANT_COUNT
+                    FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
+                    WHERE GRANTEE_NAME = '{selected}' AND DELETED_ON IS NULL
+                """).collect()
+                grant_count = int(grant_rows[0]['GRANT_COUNT']) if grant_rows else 0
+            except Exception:
+                grant_count = 0
+
+            try:
+                user_rows = session.sql(f"""
+                    SELECT COUNT(*) AS USER_COUNT
+                    FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_USERS
+                    WHERE ROLE = '{selected}' AND DELETED_ON IS NULL
+                """).collect()
+                user_count = int(user_rows[0]['USER_COUNT']) if user_rows else 0
+            except Exception:
+                user_count = 0
+
+            st.session_state[f"ac_indiv_metrics_{selected}"] = {
+                "grants": grant_count, "users": user_count
+            }
+
+            _stat.markdown('<p style="color: #003D73; font-weight: 600;">Analyzing with AI...</p>', unsafe_allow_html=True)
+            _prog.progress(70)
             prompt = (
-                "You are a Snowflake expert specializing in access control, security, and identity management. "
-                "Analyze the following access control data from SNOWFLAKE.ACCOUNT_USAGE views. "
-                "Provide:\n"
-                "1. **Summary Assessment**: Overall security posture\n"
-                "2. **Key Findings**: Authentication risks, authorization gaps, privilege concerns\n"
-                "3. **Recommendations**: Specific steps to harden access controls\n"
-                "4. **Risk Areas**: MFA gaps, orphan roles, excessive privileges, login anomalies\n\n"
+                f"You are a Snowflake expert specializing in access control and RBAC. "
+                f"Analyze the following data for role '{selected}'. "
+                f"Format your response using proper Markdown with ## headers, bullet points, and bold text. "
+                f"Provide:\n"
+                f"1. **Role Overview**: Purpose and scope of this role\n"
+                f"2. **Privilege Analysis**: Distribution and appropriateness of grants\n"
+                f"3. **User Assignment**: Who has this role and is it appropriate\n"
+                f"4. **Security Concerns**: Over-privilege, grant_option risks, etc.\n"
+                f"5. **Recommendations**: Specific improvements for this role\n\n"
                 f"DATA:\n{data_summary}"
             )
             result = _call_cortex(session, model, prompt)
-            st.session_state[cache_key] = result
+            st.session_state[indiv_key] = result
+            _prog.progress(100)
+            _prog.empty()
+            _stat.empty()
 
-    if cache_key in st.session_state:
-        st.markdown("---")
-        st.markdown(st.session_state[cache_key])
+        indiv_key = f"ac_indiv_{selected}"
+        if indiv_key in st.session_state:
+            metrics = st.session_state.get(f"ac_indiv_metrics_{selected}", {})
+            if metrics:
+                c1, c2 = st.columns(2)
+                c1.metric("Grants", metrics.get("grants", 0))
+                c2.metric("Users Assigned", metrics.get("users", 0))
+
+            st.markdown("---")
+            raw_text = st.session_state[indiv_key]
+            if isinstance(raw_text, str) and raw_text.startswith('"') and raw_text.endswith('"'):
+                raw_text = raw_text[1:-1]
+            clean_text = raw_text.replace("\\n", "\n").replace("\\t", "  ")
+            st.markdown(clean_text)

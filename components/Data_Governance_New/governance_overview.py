@@ -1,658 +1,239 @@
-"""
-Data Governance Overview Component
-
-Provides a high-level overview of data governance status with sub-tabs
-for Overview, Object Tagging & Classification, Data Privacy & Protection,
-and Data Lineage & Quality.
-"""
-
 import streamlit as st
 import pandas as pd
-try:
-    from streamlit_echarts import st_echarts
-except ImportError:
-    def st_echarts(**kwargs):
-        import streamlit as st
-        st.info("Chart unavailable (echarts not supported in SiS)")
+import plotly.graph_objects as go
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.config.design_tokens import (
+    BRAND_PRIMARY, BRAND_SECONDARY,
+    CHART_SERIES, CHART_EXTENDED,
+)
 from .object_tagging_classification import comp_object_tagging_classification
 from .data_privacy_protection import comp_data_privacy_protection
 from .lineage_quality import comp_lineage_quality
+from ._dg_queries import ALL_DG_QUERIES
 
 
+def _run_query(sql):
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        return session.sql(sql).to_pandas()
+    except Exception as e:
+        st.warning(f"Query error: {e}")
+        return pd.DataFrame()
 
 
-def _render_tag_coverage_bar_chart(tag_df):
-    """Render tag coverage by apply method as a horizontal stacked bar chart using ECharts."""
-    df_sorted = tag_df.sort_values('TOTAL_TAGS', ascending=True)
-
-    apply_methods = df_sorted['APPLY_METHOD'].tolist()
-    total_tags = [int(v) for v in df_sorted['TOTAL_TAGS'].tolist()]
-    objects_covered = [int(v) for v in df_sorted['OBJECTS_COVERED'].tolist()]
-
-    option = {
-        "tooltip": {
-            "trigger": "axis",
-            "axisPointer": {"type": "shadow"},
-        },
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 15,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 11}
-        },
-        "grid": {
-            "left": "3%",
-            "right": "4%",
-            "bottom": "15%",
-            "top": "3%",
-            "containLabel": True
-        },
-        "xAxis": {
-            "type": "value",
-            "name": "Count",
-            "nameLocation": "middle",
-            "nameGap": 25
-        },
-        "yAxis": {
-            "type": "category",
-            "data": apply_methods,
-            "axisLabel": {"fontSize": 10}
-        },
-        "color": ["#1f77b4", "#ff7f0e"],
-        "series": [
-            {
-                "name": "Total Tags",
-                "type": "bar",
-                "stack": "total",
-                "data": total_tags
-            },
-            {
-                "name": "Objects Covered",
-                "type": "bar",
-                "stack": "total",
-                "data": objects_covered
-            }
-        ]
-    }
-
-    st_echarts(options=option, height="400px", key="tag_coverage_bar_chart")
+def _run_query_thread(session, key, sql):
+    try:
+        return key, session.sql(sql).to_pandas(), None
+    except Exception as e:
+        return key, pd.DataFrame(), e
 
 
-def _render_tag_coverage_pie_chart(tag_df):
-    """Render tag coverage standard pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_TAGS']), "name": f"{row['APPLY_METHOD']} ({int(row['TOTAL_TAGS'])})"}
-        for _, row in tag_df.iterrows() if int(row['TOTAL_TAGS']) > 0
-    ]
-
-    if not chart_data:
-        chart_data = [{"value": 0, "name": "No Tags"}]
-
-    option = {
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 10},
-            "type": "scroll"
-        },
-        "tooltip": {
-            "trigger": "item",
-            "formatter": "{b}: {c} ({d}%)"
-        },
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "mark": {"show": True},
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True},
-            },
-        },
-        "series": [
-            {
-                "name": "Tag Count",
-                "type": "pie",
-                "radius": ["0%", "50%"],
-                "center": ["50%", "40%"],
-                "itemStyle": {"borderRadius": 5},
-                "data": chart_data,
-            }
-        ],
-    }
-
-    st_echarts(options=option, height="400px", key="tag_coverage_pie_chart")
+def _prefetch_all_governance_queries(progress_bar=None, status_text=None):
+    session = st.session_state.get("session")
+    if not session:
+        return
+    needed = {k: sql for k, sql in ALL_DG_QUERIES.items() if k not in st.session_state}
+    if not needed:
+        return
+    total = len(needed)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_run_query_thread, session, k, sql): k
+            for k, sql in needed.items()
+        }
+        for future in as_completed(futures):
+            key, df, err = future.result()
+            st.session_state[key] = df
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.progress(completed / total)
+            if status_text is not None:
+                status_text.text(f"Loading data... ({completed}/{total} queries)")
+    if progress_bar is not None:
+        progress_bar.empty()
+    if status_text is not None:
+        status_text.empty()
 
 
-def _render_tag_coverage_donut_chart(tag_df):
-    """Render tag coverage donut pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_TAGS']), "name": f"{row['APPLY_METHOD']} ({int(row['TOTAL_TAGS'])})"}
-        for _, row in tag_df.iterrows() if int(row['TOTAL_TAGS']) > 0
-    ]
-
-    if not chart_data:
-        chart_data = [{"value": 0, "name": "No Tags"}]
-
-    option = {
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 10},
-            "type": "scroll"
-        },
-        "tooltip": {
-            "trigger": "item",
-            "formatter": "{b}: {c} ({d}%)"
-        },
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "mark": {"show": True},
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True},
-            },
-        },
-        "series": [
-            {
-                "name": "Tag Count",
-                "type": "pie",
-                "radius": ["25%", "50%"],
-                "center": ["50%", "40%"],
-                "itemStyle": {"borderRadius": 8},
-                "data": chart_data,
-            }
-        ],
-    }
-
-    st_echarts(options=option, height="400px", key="tag_coverage_donut_chart")
-
-
-def _render_tag_coverage_rose_chart(tag_df):
-    """Render tag coverage rose-type pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_TAGS']), "name": f"{row['APPLY_METHOD']} ({int(row['TOTAL_TAGS'])})"}
-        for _, row in tag_df.iterrows() if int(row['TOTAL_TAGS']) > 0
-    ]
-
-    if not chart_data:
-        chart_data = [{"value": 0, "name": "No Tags"}]
-
-    option = {
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 10},
-            "type": "scroll"
-        },
-        "tooltip": {
-            "trigger": "item",
-            "formatter": "{b}: {c} ({d}%)"
-        },
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "mark": {"show": True},
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True},
-            },
-        },
-        "series": [
-            {
-                "name": "Tag Count",
-                "type": "pie",
-                "radius": ["15%", "55%"],
-                "center": ["50%", "40%"],
-                "roseType": "area",
-                "itemStyle": {"borderRadius": 5},
-                "data": chart_data,
-            }
-        ],
-    }
-
-    st_echarts(options=option, height="400px", key="tag_coverage_rose_chart")
-
-
-def _render_governance_kpi_tiles(total_tables, tagged_tables):
-    """KPI tiles showing governance metrics using accurate counts."""
-    untagged_tables = total_tables - tagged_tables
-    coverage_pct = round(tagged_tables / total_tables * 100, 2) if total_tables > 0 else 0.0
-
-    pct_color = "#2ca02c" if coverage_pct >= 70 else "#ff7f0e" if coverage_pct >= 40 else "#d62728"
-
+def _render_kpi_tiles(total_tables, tagged_tables):
+    untagged = total_tables - tagged_tables
+    pct = round(tagged_tables / total_tables * 100, 2) if total_tables > 0 else 0.0
+    pct_color = "#0077B6" if pct >= 70 else "#E8A229" if pct >= 40 else "#E74C3C"
     st.markdown(f"""
     <div style="display: flex; gap: 16px; padding: 10px 0;">
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0f4ff 0%, #e8eeff 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: #f0f7fb; border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Total Tables</div>
-            <div style="font-size: 36px; font-weight: 700; color: #1f77b4; line-height: 1;">{total_tables:,}</div>
+            <div style="font-size: 36px; font-weight: 700; color: #29B5E8; line-height: 1;">{total_tables:,}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #f0fff0 0%, #e0ffe0 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: #EAF8F0; border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tagged Tables</div>
-            <div style="font-size: 36px; font-weight: 700; color: #2ca02c; line-height: 1;">{tagged_tables:,}</div>
+            <div style="font-size: 36px; font-weight: 700; color: #11567F; line-height: 1;">{tagged_tables:,}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #fff0f0 0%, #ffe0e0 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: #FDEDEC; border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Untagged Tables</div>
-            <div style="font-size: 36px; font-weight: 700; color: #d62728; line-height: 1;">{untagged_tables:,}</div>
+            <div style="font-size: 36px; font-weight: 700; color: #E74C3C; line-height: 1;">{untagged:,}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: linear-gradient(135deg, #fff4e6 0%, #ffedcc 100%); border-radius: 12px;">
+        <div style="flex: 1; text-align: left; padding: 18px; background: #fff3cd; border-radius: 12px;">
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tag Coverage %</div>
-            <div style="font-size: 36px; font-weight: 700; color: {pct_color}; line-height: 1;">{coverage_pct:.2f}%</div>
+            <div style="font-size: 36px; font-weight: 700; color: {pct_color}; line-height: 1;">{pct:.1f}%</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 
-def _render_governance_health_score_content():
-    """Render governance health score with tag coverage table, apply method chart, and tagging audit charts."""
+def _render_governance_health_score():
+    df = st.session_state.get("dg_health_score_data", pd.DataFrame())
+    tag_df = st.session_state.get("dg_classification_data", pd.DataFrame())
 
-    tag_coverage_by_db_query = """
-    WITH Get_Tables AS (
-        SELECT object_id, object_database, object_schema, object_name,
-               ANY_VALUE(TAG_NAME) AS HAS_TAG
-        FROM   SNOWFLAKE.ACCOUNT_USAGE.TAG_REFERENCES tr
-        WHERE  tr.DOMAIN IN ('TABLE', 'COLUMN')
-        AND    tr.OBJECT_DELETED IS NULL
-GROUP BY object_id, object_database, object_schema, object_name
-    )
-    SELECT
-        t.TABLE_CATALOG AS database_name,
-        COUNT(*) AS total_tables,
-        COUNT(DISTINCT CASE WHEN tr.HAS_TAG IS NOT NULL THEN t.TABLE_ID END) AS tagged_tables,
-        COUNT(*) - COUNT(DISTINCT CASE WHEN tr.HAS_TAG IS NOT NULL THEN t.TABLE_ID END) AS untagged_tables,
-        ROUND(COUNT(DISTINCT CASE WHEN tr.HAS_TAG IS NOT NULL THEN t.TABLE_ID END)
-              / NULLIF(COUNT(*), 0) * 100, 2) AS coverage_pct
-    FROM   SNOWFLAKE.ACCOUNT_USAGE.TABLES t
-    LEFT JOIN Get_Tables tr ON t.TABLE_ID = tr.OBJECT_ID
-    WHERE  t.DELETED IS NULL
-    AND    t.TABLE_CATALOG != 'SNOWFLAKE'
-    AND    t.TABLE_SCHEMA != 'INFORMATION_SCHEMA'
-GROUP BY t.TABLE_CATALOG
-    ORDER BY total_tables DESC
-    """
+    if df.empty:
+        st.info("No governance health data available.")
+        return
 
-    tag_apply_method_query = """
-    WITH APM AS (
-        SELECT $1 APPLY_METHOD FROM VALUES
-            ('CLASSIFIED'), ('INHERITED'), ('MANUAL'), ('PROPAGATED'), ('NULL'), ('NONE')
-    ),
-    VEW AS (
-        SELECT COALESCE(APPLY_METHOD, 'NULL') AS APPLY_METHOD,
-               COUNT(*) AS total_tags,
-               COALESCE(COUNT(DISTINCT OBJECT_NAME), 0) AS objects_covered
-        FROM   SNOWFLAKE.ACCOUNT_USAGE.TAG_REFERENCES
-        WHERE  OBJECT_DELETED IS NULL
-        AND    OBJECT_DATABASE != 'SNOWFLAKE'
-        GROUP BY 1
-    )
-    SELECT APM.APPLY_METHOD,
-           COALESCE(VEW.TOTAL_TAGS, 0) AS TOTAL_TAGS,
-           COALESCE(VEW.OBJECTS_COVERED, 0) AS OBJECTS_COVERED
-    FROM   APM
-    LEFT OUTER JOIN VEW ON APM.APPLY_METHOD = VEW.APPLY_METHOD
-    """
+    total = int(df["TOTAL_TABLES"].sum())
+    tagged = int(df["TAGGED_TABLES"].sum())
+    _render_kpi_tiles(total, tagged)
 
-    try:
-        coverage_by_db_df = st.session_state.session.sql(tag_coverage_by_db_query).to_pandas()
-        tag_method_df = st.session_state.session.sql(tag_apply_method_query).to_pandas()
+    col1, col2 = st.columns(2)
+    palette = CHART_SERIES + CHART_EXTENDED
 
-        total_tables = int(coverage_by_db_df['TOTAL_TABLES'].sum()) if len(coverage_by_db_df) > 0 else 0
-        tagged_tables = int(coverage_by_db_df['TAGGED_TABLES'].sum()) if len(coverage_by_db_df) > 0 else 0
+    with col1:
+        st.markdown("##### Tag Coverage by Database")
+        display = df[["DATABASE_NAME", "TOTAL_TABLES", "TAGGED_TABLES", "UNTAGGED_TABLES", "COVERAGE_PCT"]].copy()
+        display.columns = ["Database", "Total Tables", "Tagged", "Untagged", "Coverage %"]
+        st.dataframe(display, use_container_width=True)
 
-        _render_governance_kpi_tiles(total_tables, tagged_tables)
-
-        st.markdown("")
-
-        col1, col2 = st.columns([1, 1])
-
-        with col1.container(border=True, height=550):
-            st.markdown("##### Tag Coverage Metrics By Database")
-            if len(coverage_by_db_df) > 0:
-                display_df = coverage_by_db_df[['DATABASE_NAME', 'TOTAL_TABLES', 'TAGGED_TABLES', 'UNTAGGED_TABLES', 'COVERAGE_PCT']].copy()
-                display_df.columns = ['Database', 'Total Tables', 'Tagged Tables', 'Untagged Tables', 'Coverage %']
-                st.dataframe(display_df, use_container_width=True, height=450)
-            else:
-                st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                            'ℹ️&nbsp;&nbsp;No tag coverage data available.'
-                            '</div>', unsafe_allow_html=True)
-
-        with col2.container(border=True, height=550):
-            st.markdown("##### Tags by Apply Method")
-
-            if len(tag_method_df) > 0:
-                chart_type = st.selectbox(
-                    "Change Chart Type",
-                    ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-                    index=0,
-                    key="tag_coverage_chart_type"
+    with col2:
+        st.markdown("##### Classification Source Breakdown")
+        if not tag_df.empty:
+            filtered = tag_df[tag_df["TOTAL_TAGS"] > 0]
+            if not filtered.empty:
+                colors = [palette[i % len(palette)] for i in range(len(filtered))]
+                fig = go.Figure(data=[go.Bar(
+                    x=filtered["APPLY_METHOD"].tolist(),
+                    y=filtered["TOTAL_TAGS"].astype(int).tolist(),
+                    marker_color=colors,
+                    text=filtered["TOTAL_TAGS"].astype(int).tolist(),
+                    textposition="outside",
+                    hovertemplate="<b>%{x}</b><br>Tags: %{y:,}<extra></extra>",
+                )])
+                fig.update_layout(
+                    height=350, margin=dict(t=10, b=40, l=40, r=20),
+                    xaxis_title="Apply Method", yaxis_title="Tag Count",
+                    showlegend=False,
                 )
-
-                if chart_type == "Bar Chart":
-                    _render_tag_coverage_bar_chart(tag_method_df)
-                elif chart_type == "Pie Chart":
-                    _render_tag_coverage_pie_chart(tag_method_df)
-                elif chart_type == "Pie - Donut":
-                    _render_tag_coverage_donut_chart(tag_method_df)
-                else:
-                    _render_tag_coverage_rose_chart(tag_method_df)
+                st.plotly_chart(fig, use_container_width=True)
             else:
-                st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                            'ℹ️&nbsp;&nbsp;No tag apply method data available.'
-                            '</div>', unsafe_allow_html=True)
-
-
-    except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Error loading governance health score: {str(e)}'
-                    f'</div>', unsafe_allow_html=True)
-
-
-def _render_policy_inventory_bar_chart(policy_df):
-    """Render policy inventory vertical bar chart using ECharts."""
-    df_sorted = policy_df.sort_values('ACTIVE_COUNT', ascending=False)
-
-    policy_kinds = df_sorted['POLICY_KIND'].tolist()
-    active_counts = [int(v) for v in df_sorted['ACTIVE_COUNT'].tolist()]
-
-    option = {
-        "tooltip": {
-            "trigger": "axis",
-            "axisPointer": {"type": "shadow"},
-        },
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 15,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 11}
-        },
-        "grid": {
-            "left": "3%",
-            "right": "4%",
-            "bottom": "15%",
-            "top": "3%",
-            "containLabel": True
-        },
-        "xAxis": {
-            "type": "category",
-            "data": policy_kinds,
-            "axisLabel": {"fontSize": 10, "rotate": 30}
-        },
-        "yAxis": {
-            "type": "value",
-            "name": "Active Count",
-            "nameLocation": "middle",
-            "nameGap": 35
-        },
-        "color": ["#1f77b4"],
-        "series": [
-            {
-                "name": "Active Count",
-                "type": "bar",
-                "data": active_counts
-            }
-        ]
-    }
-
-    st_echarts(options=option, height="400px", key="policy_inventory_bar_chart")
-
-
-def _render_policy_inventory_pie_chart(policy_df):
-    """Render policy inventory standard pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['ACTIVE_COUNT']), "name": f"{row['POLICY_KIND']} ({int(row['ACTIVE_COUNT'])})"}
-        for _, row in policy_df.iterrows() if int(row['ACTIVE_COUNT']) > 0
-    ]
-
-    if not chart_data:
-        chart_data = [{"value": 0, "name": "No Active Policies"}]
-
-    option = {
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 10},
-            "type": "scroll"
-        },
-        "tooltip": {
-            "trigger": "item",
-            "formatter": "{b}: {c} ({d}%)"
-        },
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "mark": {"show": True},
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True},
-            },
-        },
-        "series": [
-            {
-                "name": "Policy Count",
-                "type": "pie",
-                "radius": ["0%", "50%"],
-                "center": ["50%", "40%"],
-                "itemStyle": {"borderRadius": 5},
-                "data": chart_data,
-            }
-        ],
-    }
-
-    st_echarts(options=option, height="400px", key="policy_inventory_pie_chart")
-
-
-def _render_policy_inventory_donut_chart(policy_df):
-    """Render policy inventory donut pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['ACTIVE_COUNT']), "name": f"{row['POLICY_KIND']} ({int(row['ACTIVE_COUNT'])})"}
-        for _, row in policy_df.iterrows() if int(row['ACTIVE_COUNT']) > 0
-    ]
-
-    if not chart_data:
-        chart_data = [{"value": 0, "name": "No Active Policies"}]
-
-    option = {
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 10},
-            "type": "scroll"
-        },
-        "tooltip": {
-            "trigger": "item",
-            "formatter": "{b}: {c} ({d}%)"
-        },
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "mark": {"show": True},
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True},
-            },
-        },
-        "series": [
-            {
-                "name": "Policy Count",
-                "type": "pie",
-                "radius": ["25%", "50%"],
-                "center": ["50%", "40%"],
-                "itemStyle": {"borderRadius": 8},
-                "data": chart_data,
-            }
-        ],
-    }
-
-    st_echarts(options=option, height="400px", key="policy_inventory_donut_chart")
-
-
-def _render_policy_inventory_rose_chart(policy_df):
-    """Render policy inventory rose-type pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['ACTIVE_COUNT']), "name": f"{row['POLICY_KIND']} ({int(row['ACTIVE_COUNT'])})"}
-        for _, row in policy_df.iterrows() if int(row['ACTIVE_COUNT']) > 0
-    ]
-
-    if not chart_data:
-        chart_data = [{"value": 0, "name": "No Active Policies"}]
-
-    option = {
-        "legend": {
-            "bottom": "10",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 14,
-            "textStyle": {"fontSize": 10},
-            "type": "scroll"
-        },
-        "tooltip": {
-            "trigger": "item",
-            "formatter": "{b}: {c} ({d}%)"
-        },
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "mark": {"show": True},
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True},
-            },
-        },
-        "series": [
-            {
-                "name": "Policy Count",
-                "type": "pie",
-                "radius": ["15%", "55%"],
-                "center": ["50%", "40%"],
-                "roseType": "area",
-                "itemStyle": {"borderRadius": 5},
-                "data": chart_data,
-            }
-        ],
-    }
-
-    st_echarts(options=option, height="400px", key="policy_inventory_rose_chart")
-
-
-def _render_policy_inventory_content():
-    """Render policy inventory with table + buttons and chart in two columns."""
-
-    policy_inventory_query = """
-    WITH SF   AS (SELECT DISTINCT POLICY_KIND
-                  FROM   SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES),
-         S360 AS (SELECT POLICY_KIND,
-                         COUNT(*) AS ACTIVE_COUNT
-                  FROM   SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES S360
-                  WHERE  S360.POLICY_STATUS = 'ACTIVE'
-                  AND    S360.POLICY_DB != 'SNOWFLAKE'
-                  GROUP BY 1)
-    SELECT SF.POLICY_KIND,
-           NVL(S360.ACTIVE_COUNT, 0) AS ACTIVE_COUNT
-    FROM   SF
-    LEFT OUTER JOIN S360 ON SF.POLICY_KIND = S360.POLICY_KIND
-    ORDER BY 1, 2
-    """
-
-    try:
-        policy_df = st.session_state.session.sql(policy_inventory_query).to_pandas()
-
-        if len(policy_df) > 0:
-            table_col, chart_col = st.columns([1, 1])
-
-            with table_col.container(border=True, height=600):
-                display_df = policy_df.copy()
-                display_df.columns = ['Policy Kind', 'Active Count']
-
-                st.markdown("##### Policy Inventory")
-                st.dataframe(display_df, use_container_width=True, height=422)
-
-            with chart_col.container(border=True, height=600):
-                st.markdown("##### Policy Inventory by Kind")
-
-                chart_type = st.selectbox(
-                    "Change Chart Type",
-                    ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-                    index=0,
-                    key="policy_inv_chart_type"
-                )
-
-                if chart_type == "Bar Chart":
-                    _render_policy_inventory_bar_chart(policy_df)
-                elif chart_type == "Pie Chart":
-                    _render_policy_inventory_pie_chart(policy_df)
-                elif chart_type == "Pie - Donut":
-                    _render_policy_inventory_donut_chart(policy_df)
-                else:
-                    _render_policy_inventory_rose_chart(policy_df)
+                st.info("No classification data available.")
         else:
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        'ℹ️&nbsp;&nbsp;No policy inventory data available.'
-                        '</div>', unsafe_allow_html=True)
+            st.info("No classification data available.")
 
-    except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Error loading policy inventory: {str(e)}'
-                    f'</div>', unsafe_allow_html=True)
+
+def _render_policy_inventory():
+    df = st.session_state.get("dg_policy_inventory_data", pd.DataFrame())
+
+    if df.empty:
+        st.info("No policy inventory data available.")
+        return
+
+    col1, col2 = st.columns(2)
+    palette = CHART_SERIES + CHART_EXTENDED
+
+    with col1:
+        st.markdown("##### Policy Inventory")
+        display = df.copy()
+        display.columns = ["Policy Kind", "Active Count"]
+        st.dataframe(display, use_container_width=True)
+
+    with col2:
+        st.markdown("##### Policy Inventory by Kind")
+        active = df[df["ACTIVE_COUNT"] > 0]
+        if not active.empty:
+            colors = [palette[i % len(palette)] for i in range(len(active))]
+            fig = go.Figure(data=[go.Pie(
+                labels=active["POLICY_KIND"].tolist(),
+                values=active["ACTIVE_COUNT"].astype(int).tolist(),
+                marker=dict(colors=colors),
+                textinfo="label+value",
+                hole=0.35,
+            )])
+            fig.update_layout(height=350, margin=dict(t=10, b=10, l=10, r=10), showlegend=True)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No active policies found.")
+
+
+def _render_sensitivity_heatmap():
+    df = st.session_state.get("dg_sensitivity_heatmap", pd.DataFrame())
+    if df.empty:
+        st.info("No sensitivity tags found. Consider running Snowflake's automatic classification or applying sensitivity tags manually.")
+        return
+    df['OBJECT_COUNT'] = pd.to_numeric(df['OBJECT_COUNT'], errors='coerce').fillna(0)
+    palette = CHART_SERIES + CHART_EXTENDED
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Sensitivity-Tagged Objects", int(df['OBJECT_COUNT'].sum()))
+        colors = [palette[i % len(palette)] for i in range(len(df))]
+        fig = go.Figure(go.Bar(
+            x=df['SENSITIVITY_LEVEL'], y=df['OBJECT_COUNT'],
+            marker_color=colors,
+            text=df['OBJECT_COUNT'].astype(int).tolist(), textposition='outside'
+        ))
+        fig.update_layout(
+            title='Objects by Sensitivity Level',
+            xaxis_title='Sensitivity Level', yaxis_title='Object Count',
+            height=380, margin=dict(t=50, b=80)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        fig2 = go.Figure(go.Pie(
+            labels=df['SENSITIVITY_LEVEL'], values=df['OBJECT_COUNT'],
+            hole=0.3, marker=dict(colors=colors),
+            textinfo='label+percent'
+        ))
+        fig2.update_layout(title='Sensitivity Distribution', height=380, margin=dict(t=50, b=20))
+        st.plotly_chart(fig2, use_container_width=True)
+    st.dataframe(df)
 
 
 def _render_overview_content():
-    """Render the core governance overview content (health score, heatmap, policy inventory)."""
-    st.markdown("### Data Governance Overview")
+    st.markdown("### Governance Overview")
 
     with st.expander("Governance Health Score", expanded=True):
-        st.markdown("#### Governance Health Score")
-        _render_governance_health_score_content()
+        _render_governance_health_score()
 
-    with st.expander("Sensitivity Heatmap", expanded=False):
-        st.markdown("#### Sensitivity Heatmap")
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    'ℹ️&nbsp;&nbsp;Content for Sensitivity Heatmap will be implemented here.'
-                    '</div>', unsafe_allow_html=True)
+    with st.expander("Sensitivity Heatmap", expanded=True):
+        _render_sensitivity_heatmap()
 
     with st.expander("Policy Inventory", expanded=True):
-        st.markdown("#### Policy Inventory")
-        _render_policy_inventory_content()
+        _render_policy_inventory()
 
 
 def comp_governance_overview(entry_actions=None):
-    """
-    Data Governance Overview Component
-
-    Renders sub-tabs for:
-    - Overview: Governance Health Score, Sensitivity Heatmap, Policy Inventory
-    - Data Object Tagging & Classification
-    - Data Privacy & Protection
-    - Data Lineage & Quality (Lite)
-
-    Args:
-        entry_actions: Optional callback actions on component entry
-    """
     try:
+        status_ph = st.empty()
+        progress_ph = st.empty()
+        all_cached = all(k in st.session_state for k in ALL_DG_QUERIES)
+        if not all_cached:
+            status_ph.markdown(
+                '<p style="color: #003D73; font-weight: 600;">Loading Data Governance data...</p>',
+                unsafe_allow_html=True
+            )
+            progress_bar_widget = progress_ph.progress(0)
+            _prefetch_all_governance_queries(
+                progress_bar=progress_bar_widget,
+                status_text=status_ph
+            )
+            progress_ph.empty()
+            status_ph.empty()
+
         sub_tab_names = [
             "Overview",
-            "Data Object Tagging & Classification",
+            "Object Tagging & Classification",
             "Data Privacy & Protection",
-            "Data Lineage & Quality (Lite)"
+            "Lineage & Quality"
         ]
         sub_tabs = st.tabs(sub_tab_names)
 
@@ -669,6 +250,8 @@ def comp_governance_overview(entry_actions=None):
             comp_lineage_quality()
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Error loading Data Governance Overview: {str(e)}'
-                    f'</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px;">'
+            f'Error loading Data Governance Overview: {e}</div>',
+            unsafe_allow_html=True,
+        )

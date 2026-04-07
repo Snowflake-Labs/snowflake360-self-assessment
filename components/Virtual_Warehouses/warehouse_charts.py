@@ -248,7 +248,7 @@ def display_warehouse_summary_metrics(properties: dict, metrics: dict, warehouse
 def display_warehouse_charts(warehouse_details_json_str: str, warehouse_name: str):
     """Display warehouse performance charts from time series data exactly like the reference project."""
     if not warehouse_details_json_str or warehouse_details_json_str == '{}':
-        st.markdown(f'<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'ℹ️&nbsp;&nbsp;No detailed data available for {warehouse_name} charts.'
                     f'</div>', unsafe_allow_html=True)
         return
@@ -290,28 +290,28 @@ def display_warehouse_charts(warehouse_details_json_str: str, warehouse_name: st
                 col1, col2 = st.columns(2)
                 with col1:
                     # Chart 1: Credits Consumption Over Time
-                    with st.container(border=True):
+                    with st.container():
                         plot_credits_over_time(df_period_data, time_col_name=time_col_for_charts, granularity_label=granularity_label, chart_type="Line Chart")
 
                     # Chart 2: Query Load and Queuing
-                    with st.container(border=True):
+                    with st.container():
                         plot_load_and_queuing(df_period_data, time_col_name=time_col_for_charts, granularity_label=granularity_label)
 
                     # Chart 3: Total Disk Spilling (Local + Remote)
-                    with st.container(border=True):
+                    with st.container():
                         plot_spilling_gb_over_time(df_period_data, time_col_name=time_col_for_charts, granularity_label=granularity_label, chart_type="Bar Chart")
 
                 with col2:
                     # Chart 4: Total Queries
-                    with st.container(border=True):
+                    with st.container():
                         plot_total_queries(df_period_data, time_col_name=time_col_for_charts, granularity_label=granularity_label, chart_type="Line Chart")
 
                     # Chart 5: P95 Query Elapsed Time
-                    with st.container(border=True):
+                    with st.container():
                         plot_p95_elapsed_time(df_period_data, time_col_name=time_col_for_charts, granularity_label=granularity_label)
 
                     # Chart 6: Avg. Query Time Components
-                    with st.container(border=True):
+                    with st.container():
                         plot_avg_time_components(df_period_data, time_col_name=time_col_for_charts, granularity_label=granularity_label)
             else:
                 # st.warning(f"Time series data structure error for {warehouse_name} - missing time column '{time_col_for_charts}'")
@@ -326,7 +326,7 @@ def display_warehouse_charts(warehouse_details_json_str: str, warehouse_name: st
 
     except Exception as e:
         # st.error(f"Error displaying charts for {warehouse_name}: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error displaying charts for {warehouse_name}: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
         # Show debug info if needed

@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_problematic_query_report(entry_actions=None):
     """
     Problematic Query - Report (Native Insights) Component
@@ -22,7 +36,7 @@ def comp_problematic_query_report(entry_actions=None):
             session = get_active_session()
         except Exception as e:
             # st.error(f"Unable to get Snowflake session: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -62,10 +76,10 @@ ORDER BY 3 DESC
 
         # Execute query
         try:
-            df = session.sql(query).to_pandas()
+            df = _cached_sql("tf_problematic_queries", query)
         except Exception as e:
             # st.error(f"Error executing query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -90,7 +104,6 @@ ORDER BY 3 DESC
             # Display the dataframe
             st.dataframe(
                 df,
-                hide_index=True
             )
 
             # Charts Section
@@ -100,22 +113,22 @@ ORDER BY 3 DESC
             # Row 1: Two charts
             col1, col2 = st.columns(2)
 
-            with col1.container(border=True):
+            with col1.container():
                 st.markdown("##### Issue Occurrences by Category")
                 _render_category_occurrences_chart(df, key_prefix="cat_occ_")
 
-            with col2.container(border=True):
+            with col2.container():
                 st.markdown("##### Distinct Queries by Category")
                 _render_distinct_queries_chart(df, key_prefix="dist_queries_")
 
             # Row 2: Two charts
             col3, col4 = st.columns(2)
 
-            with col3.container(border=True):
+            with col3.container():
                 st.markdown("##### Top Insight Codes by Occurrence")
                 _render_insight_codes_chart(df, key_prefix="insight_codes_")
 
-            with col4.container(border=True):
+            with col4.container():
                 st.markdown("##### Category Distribution")
                 _render_category_distribution_chart(df, key_prefix="cat_dist_")
 
@@ -153,10 +166,10 @@ ORDER BY 2 DESC
 
         # Execute category summary query
         try:
-            category_df = session.sql(category_summary_query).to_pandas()
+            category_df = _cached_sql("tf_category_summary", category_summary_query)
         except Exception as e:
             # st.error(f"Error executing category summary query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing category summary query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             category_df = pd.DataFrame()
@@ -176,7 +189,6 @@ ORDER BY 2 DESC
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section
@@ -186,28 +198,28 @@ ORDER BY 2 DESC
                 # Row 1: Two charts
                 cat_col1, cat_col2 = st.columns(2)
 
-                with cat_col1.container(border=True):
+                with cat_col1.container():
                     st.markdown("##### Total Occurrences by Category")
                     _render_cat_summary_occurrences_chart(category_df, key_prefix="cat_sum_occ_")
 
-                with cat_col2.container(border=True):
+                with cat_col2.container():
                     st.markdown("##### Distinct Queries Affected by Category")
                     _render_cat_summary_distinct_chart(category_df, key_prefix="cat_sum_dist_")
 
                 # Row 2: Two charts
                 cat_col3, cat_col4 = st.columns(2)
 
-                with cat_col3.container(border=True):
+                with cat_col3.container():
                     st.markdown("##### Occurrences vs Distinct Queries")
                     _render_cat_summary_comparison_chart(category_df, key_prefix="cat_sum_comp_")
 
-                with cat_col4.container(border=True):
+                with cat_col4.container():
                     st.markdown("##### Category Proportion")
                     _render_cat_summary_proportion_chart(category_df, key_prefix="cat_sum_prop_")
 
     except Exception as e:
         # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -246,7 +258,7 @@ def _render_category_occ_bar_chart(df, key_prefix=""):
             y=agg_df['CATEGORY'],
             x=agg_df['OCCURRENCE_COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val):,}" for val in agg_df['OCCURRENCE_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -410,7 +422,7 @@ def _render_distinct_queries_bar_chart(df, key_prefix=""):
             y=agg_df['CATEGORY'],
             x=agg_df['DISTINCT_QUERIES'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{int(val):,}" for val in agg_df['DISTINCT_QUERIES']],
             textposition='outside',
             textfont=dict(size=10),
@@ -453,7 +465,7 @@ def _render_distinct_queries_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
         "series": [{
             "name": "Distinct Queries",
             "type": "pie",
@@ -493,7 +505,7 @@ def _render_distinct_queries_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
         "series": [{
             "name": "Distinct Queries",
             "type": "pie",
@@ -533,7 +545,7 @@ def _render_distinct_queries_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
         "series": [{
             "name": "Distinct Queries",
             "type": "pie",
@@ -577,7 +589,7 @@ def _render_insight_codes_bar_chart(df, key_prefix=""):
             y=plot_df['INSIGHT_CODE'],
             x=plot_df['OCCURRENCE_COUNT'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#27AE60',
             text=[f"{int(val):,}" for val in plot_df['OCCURRENCE_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -620,7 +632,7 @@ def _render_insight_codes_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Insight Codes",
             "type": "pie",
@@ -660,7 +672,7 @@ def _render_insight_codes_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Insight Codes",
             "type": "pie",
@@ -700,7 +712,7 @@ def _render_insight_codes_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Insight Codes",
             "type": "pie",
@@ -746,7 +758,7 @@ def _render_category_dist_bar_chart(df, key_prefix=""):
             y=agg_df['CATEGORY'],
             x=agg_df['INSIGHT_CODE_COUNT'],
             orientation='h',
-            marker_color='#9467bd',
+            marker_color='#0077B6',
             text=[f"{int(val)}" for val in agg_df['INSIGHT_CODE_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -791,7 +803,7 @@ def _render_category_dist_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
         "series": [{
             "name": "Category Distribution",
             "type": "pie",
@@ -833,7 +845,7 @@ def _render_category_dist_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
         "series": [{
             "name": "Category Distribution",
             "type": "pie",
@@ -875,7 +887,7 @@ def _render_category_dist_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
         "series": [{
             "name": "Category Distribution",
             "type": "pie",
@@ -922,7 +934,7 @@ def _render_cat_sum_occ_bar_chart(df, key_prefix=""):
             y=plot_df['PROBLEM_CATEGORY'],
             x=plot_df['TOTAL_OCCURRENCES'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val):,}" for val in plot_df['TOTAL_OCCURRENCES']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1082,7 +1094,7 @@ def _render_cat_sum_dist_bar_chart(df, key_prefix=""):
             y=plot_df['PROBLEM_CATEGORY'],
             x=plot_df['DISTINCT_QUERIES_AFFECTED'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{int(val):,}" for val in plot_df['DISTINCT_QUERIES_AFFECTED']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1124,7 +1136,7 @@ def _render_cat_sum_dist_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
         "series": [{
             "name": "Distinct Queries",
             "type": "pie",
@@ -1163,7 +1175,7 @@ def _render_cat_sum_dist_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
         "series": [{
             "name": "Distinct Queries",
             "type": "pie",
@@ -1202,7 +1214,7 @@ def _render_cat_sum_dist_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
         "series": [{
             "name": "Distinct Queries",
             "type": "pie",
@@ -1247,7 +1259,7 @@ def _render_cat_sum_comp_bar_chart(df, key_prefix=""):
         x=plot_df['TOTAL_OCCURRENCES'],
         orientation='h',
         name='Total Occurrences',
-        marker_color='#1f77b4',
+        marker_color='#29B5E8',
         text=[f"{int(val):,}" for val in plot_df['TOTAL_OCCURRENCES']],
         textposition='outside',
         textfont=dict(size=9)
@@ -1258,7 +1270,7 @@ def _render_cat_sum_comp_bar_chart(df, key_prefix=""):
         x=plot_df['DISTINCT_QUERIES_AFFECTED'],
         orientation='h',
         name='Distinct Queries',
-        marker_color='#ff7f0e',
+        marker_color='#E8A229',
         text=[f"{int(val):,}" for val in plot_df['DISTINCT_QUERIES_AFFECTED']],
         textposition='outside',
         textfont=dict(size=9)
@@ -1282,7 +1294,7 @@ def _render_cat_sum_comp_grouped_bar_chart(df, key_prefix=""):
         x=df['PROBLEM_CATEGORY'],
         y=df['TOTAL_OCCURRENCES'],
         name='Total Occurrences',
-        marker_color='#1f77b4',
+        marker_color='#29B5E8',
         text=[f"{int(val):,}" for val in df['TOTAL_OCCURRENCES']],
         textposition='outside',
         textfont=dict(size=9)
@@ -1292,7 +1304,7 @@ def _render_cat_sum_comp_grouped_bar_chart(df, key_prefix=""):
         x=df['PROBLEM_CATEGORY'],
         y=df['DISTINCT_QUERIES_AFFECTED'],
         name='Distinct Queries',
-        marker_color='#ff7f0e',
+        marker_color='#E8A229',
         text=[f"{int(val):,}" for val in df['DISTINCT_QUERIES_AFFECTED']],
         textposition='outside',
         textfont=dict(size=9)
@@ -1317,14 +1329,14 @@ def _render_cat_sum_comp_stacked_bar_chart(df, key_prefix=""):
         x=df['PROBLEM_CATEGORY'],
         y=df['DISTINCT_QUERIES_AFFECTED'],
         name='Distinct Queries',
-        marker_color='#ff7f0e'
+        marker_color='#E8A229'
     ))
 
     fig.add_trace(go.Bar(
         x=df['PROBLEM_CATEGORY'],
         y=df['TOTAL_OCCURRENCES'] - df['DISTINCT_QUERIES_AFFECTED'],
         name='Repeat Occurrences',
-        marker_color='#1f77b4'
+        marker_color='#29B5E8'
     ))
 
     fig.update_layout(
@@ -1349,7 +1361,7 @@ def _render_cat_sum_comp_ratio_chart(df, key_prefix=""):
             y=plot_df['PROBLEM_CATEGORY'],
             x=plot_df['RATIO'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#27AE60',
             text=[f"{val:.1f}x" for val in plot_df['RATIO']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1397,7 +1409,7 @@ def _render_cat_sum_prop_bar_chart(df, key_prefix=""):
             y=plot_df['PROBLEM_CATEGORY'],
             x=plot_df['PERCENTAGE'],
             orientation='h',
-            marker_color='#9467bd',
+            marker_color='#0077B6',
             text=[f"{val:.1f}%" for val in plot_df['PERCENTAGE']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1439,7 +1451,7 @@ def _render_cat_sum_prop_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
         "series": [{
             "name": "Category Proportion",
             "type": "pie",
@@ -1479,7 +1491,7 @@ def _render_cat_sum_prop_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
         "series": [{
             "name": "Category Proportion",
             "type": "pie",
@@ -1519,7 +1531,7 @@ def _render_cat_sum_prop_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
         "series": [{
             "name": "Category Proportion",
             "type": "pie",

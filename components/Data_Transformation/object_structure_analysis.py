@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_object_structure_analysis(entry_actions=None):
     """
     Object Structure Analysis (Stacked Views & Security) Component
@@ -25,7 +39,7 @@ def comp_object_structure_analysis(entry_actions=None):
             session = get_active_session()
         except Exception as e:
             # st.error(f"Unable to get Snowflake session: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -64,18 +78,18 @@ SELECT
     parent_view AS root_view,
     MAX(depth) AS max_depth
 FROM view_lineage
-GROUP BY 1, 2, 3, 4, 5, 6
+GROUP BY parent_view
 HAVING MAX(depth) > 2 -- Show only "Deep" stacks
-ORDER BY 7 DESC
+ORDER BY max_depth DESC
         """
 
 
         # Execute the query
         try:
-            df = session.sql(view_dependency_query).to_pandas()
+            df = _cached_sql("tf_view_dependency", view_dependency_query)
         except Exception as e:
             # st.error(f"Error executing query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             df = pd.DataFrame()
@@ -88,7 +102,7 @@ ORDER BY 7 DESC
 
             if df.empty:
                 # st.info("No deeply nested view stacks (depth > 2) found in the current account.")
-                st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No deeply nested view stacks (depth > 2) found in the current account.'
                     '</div>', unsafe_allow_html=True)
 
@@ -101,7 +115,6 @@ ORDER BY 7 DESC
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section
@@ -114,22 +127,22 @@ ORDER BY 7 DESC
                 # Row 1: Two charts
                 col1, col2 = st.columns(2)
 
-                with col1.container(border=True):
+                with col1.container():
                     st.markdown("##### Top Views by Nesting Depth")
                     _render_depth_chart(chart_df, key_prefix="depth_")
 
-                with col2.container(border=True):
+                with col2.container():
                     st.markdown("##### Depth Distribution")
                     _render_depth_distribution_chart(chart_df, key_prefix="depth_dist_")
 
                 # Row 2: Two charts
                 col3, col4 = st.columns(2)
 
-                with col3.container(border=True):
+                with col3.container():
                     st.markdown("##### Views by Depth Category")
                     _render_depth_category_chart(chart_df, key_prefix="depth_cat_")
 
-                with col4.container(border=True):
+                with col4.container():
                     st.markdown("##### Complexity Summary")
                     _render_complexity_summary_chart(chart_df, key_prefix="complexity_")
 
@@ -170,10 +183,10 @@ LIMIT 5000
 
         # Execute the query
         try:
-            lifecycle_df = session.sql(lifecycle_query).to_pandas()
+            lifecycle_df = _cached_sql("tf_lifecycle", lifecycle_query)
         except Exception as e:
             # st.error(f"Error executing lifecycle query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing lifecycle query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             lifecycle_df = pd.DataFrame()
@@ -201,7 +214,6 @@ LIMIT 5000
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section
@@ -211,22 +223,22 @@ LIMIT 5000
                 # Row 1: Two charts
                 lc_col1, lc_col2 = st.columns(2)
 
-                with lc_col1.container(border=True):
+                with lc_col1.container():
                     st.markdown("##### Object Type Distribution")
                     _render_lifecycle_type_chart(lifecycle_df, key_prefix="lc_type_")
 
-                with lc_col2.container(border=True):
+                with lc_col2.container():
                     st.markdown("##### Lifespan Analysis")
                     _render_lifecycle_lifespan_chart(lifecycle_df, key_prefix="lc_lifespan_")
 
                 # Row 2: Two charts
                 lc_col3, lc_col4 = st.columns(2)
 
-                with lc_col3.container(border=True):
+                with lc_col3.container():
                     st.markdown("##### Secure vs Non-Secure Objects")
                     _render_lifecycle_security_chart(lifecycle_df, key_prefix="lc_security_")
 
-                with lc_col4.container(border=True):
+                with lc_col4.container():
                     st.markdown("##### Object Summary")
                     _render_lifecycle_summary_chart(lifecycle_df, key_prefix="lc_summary_")
 
@@ -313,10 +325,10 @@ ORDER BY 2 DESC
 
         # Execute the query
         try:
-            summary_df = session.sql(summary_query).to_pandas()
+            summary_df = _cached_sql("tf_summary", summary_query)
         except Exception as e:
             # st.error(f"Error executing summary query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing summary query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             summary_df = pd.DataFrame()
@@ -339,7 +351,6 @@ ORDER BY 2 DESC
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section
@@ -349,28 +360,28 @@ ORDER BY 2 DESC
                 # Row 1: Two charts
                 sum_col1, sum_col2 = st.columns(2)
 
-                with sum_col1.container(border=True):
+                with sum_col1.container():
                     st.markdown("##### Metrics by Count")
                     _render_obj_summary_count_chart(summary_df, key_prefix="obj_sum_count_")
 
-                with sum_col2.container(border=True):
+                with sum_col2.container():
                     st.markdown("##### Metrics Distribution")
                     _render_obj_summary_distribution_chart(summary_df, key_prefix="obj_sum_dist_")
 
                 # Row 2: Two charts
                 sum_col3, sum_col4 = st.columns(2)
 
-                with sum_col3.container(border=True):
+                with sum_col3.container():
                     st.markdown("##### View Depth vs Lifecycle Objects")
                     _render_obj_summary_category_chart(summary_df, key_prefix="obj_sum_cat_")
 
-                with sum_col4.container(border=True):
+                with sum_col4.container():
                     st.markdown("##### Top Metrics")
                     _render_obj_summary_top_chart(summary_df, key_prefix="obj_sum_top_")
 
     except Exception as e:
         # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -411,7 +422,7 @@ def _render_depth_bar_chart(df, key_prefix=""):
             y=plot_df['DISPLAY_NAME'],
             x=plot_df['MAX_DEPTH'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val)}" for val in plot_df['MAX_DEPTH']],
             textposition='outside',
             textfont=dict(size=10),
@@ -581,7 +592,7 @@ def _render_dist_bar_chart(df, key_prefix=""):
         go.Bar(
             x=depth_counts['DEPTH_LABEL'],
             y=depth_counts['COUNT'],
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{int(val)}" for val in depth_counts['COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -625,7 +636,7 @@ def _render_dist_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -666,7 +677,7 @@ def _render_dist_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -707,7 +718,7 @@ def _render_dist_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -763,9 +774,9 @@ def _render_cat_bar_chart(df, key_prefix=""):
     category_counts['SORT_ORDER'] = category_counts['CATEGORY'].apply(lambda x: category_order.index(x) if x in category_order else 99)
     category_counts = category_counts.sort_values('SORT_ORDER')
 
-    colors = ['#2ca02c', '#ffcc00', '#ff7f0e', '#d62728']
+    colors = ['#27AE60', '#E8A229', '#E8A229', '#E74C3C']
     color_map = {cat: colors[i] for i, cat in enumerate(category_order)}
-    bar_colors = [color_map.get(cat, '#1f77b4') for cat in category_counts['CATEGORY']]
+    bar_colors = [color_map.get(cat, '#29B5E8') for cat in category_counts['CATEGORY']]
 
     fig = go.Figure(data=[
         go.Bar(
@@ -827,7 +838,7 @@ def _render_cat_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ffcc00", "#ff7f0e", "#d62728"],
+        "color": ["#27AE60", "#E8A229", "#E8A229", "#E74C3C"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -880,7 +891,7 @@ def _render_cat_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ffcc00", "#ff7f0e", "#d62728"],
+        "color": ["#27AE60", "#E8A229", "#E8A229", "#E74C3C"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -933,7 +944,7 @@ def _render_cat_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ffcc00", "#ff7f0e", "#d62728"],
+        "color": ["#27AE60", "#E8A229", "#E8A229", "#E74C3C"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -977,7 +988,7 @@ def _render_summary_bar_chart(df, key_prefix=""):
 
     metrics = ['Total Deep Views', 'Max Depth', 'Avg Depth', 'Critical (8+)']
     values = [total_views, max_depth, round(avg_depth, 1), critical_views]
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+    colors = ['#29B5E8', '#E8A229', '#27AE60', '#E74C3C']
 
     fig = go.Figure(data=[
         go.Bar(
@@ -1031,7 +1042,7 @@ def _render_summary_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ffcc00", "#d62728"],
+        "color": ["#27AE60", "#E8A229", "#E74C3C"],
         "series": [{
             "name": "Complexity",
             "type": "pie",
@@ -1075,7 +1086,7 @@ def _render_summary_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ffcc00", "#d62728"],
+        "color": ["#27AE60", "#E8A229", "#E74C3C"],
         "series": [{
             "name": "Complexity",
             "type": "pie",
@@ -1119,7 +1130,7 @@ def _render_summary_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ffcc00", "#d62728"],
+        "color": ["#27AE60", "#E8A229", "#E74C3C"],
         "series": [{
             "name": "Complexity",
             "type": "pie",
@@ -1167,7 +1178,7 @@ def _render_lc_type_bar_chart(df, key_prefix=""):
             y=type_counts['TABLE_TYPE'],
             x=type_counts['COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val)}" for val in type_counts['COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1211,7 +1222,7 @@ def _render_lc_type_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"],
+        "color": ["#29B5E8", "#E8A229", "#27AE60", "#E74C3C", "#0077B6"],
         "series": [{
             "name": "Object Type",
             "type": "pie",
@@ -1252,7 +1263,7 @@ def _render_lc_type_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"],
+        "color": ["#29B5E8", "#E8A229", "#27AE60", "#E74C3C", "#0077B6"],
         "series": [{
             "name": "Object Type",
             "type": "pie",
@@ -1293,7 +1304,7 @@ def _render_lc_type_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"],
+        "color": ["#29B5E8", "#E8A229", "#27AE60", "#E74C3C", "#0077B6"],
         "series": [{
             "name": "Object Type",
             "type": "pie",
@@ -1334,11 +1345,11 @@ def _render_lc_lifespan_bar_chart(df, key_prefix=""):
 
     # Color mapping
     color_map = {
-        '✅ Temp Table': '#2ca02c',
-        '⚠️ Short-Lived (Non-Temp)': '#ff7f0e',
-        'Standard': '#1f77b4'
+        '✅ Temp Table': '#27AE60',
+        '⚠️ Short-Lived (Non-Temp)': '#E8A229',
+        'Standard': '#29B5E8'
     }
-    colors = [color_map.get(val, '#1f77b4') for val in lifespan_counts['LIFESPAN_CHECK']]
+    colors = [color_map.get(val, '#29B5E8') for val in lifespan_counts['LIFESPAN_CHECK']]
 
     fig = go.Figure(data=[
         go.Bar(
@@ -1389,7 +1400,7 @@ def _render_lc_lifespan_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ff7f0e", "#1f77b4"],
+        "color": ["#27AE60", "#E8A229", "#29B5E8"],
         "series": [{
             "name": "Lifespan",
             "type": "pie",
@@ -1430,7 +1441,7 @@ def _render_lc_lifespan_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ff7f0e", "#1f77b4"],
+        "color": ["#27AE60", "#E8A229", "#29B5E8"],
         "series": [{
             "name": "Lifespan",
             "type": "pie",
@@ -1471,7 +1482,7 @@ def _render_lc_lifespan_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ff7f0e", "#1f77b4"],
+        "color": ["#27AE60", "#E8A229", "#29B5E8"],
         "series": [{
             "name": "Lifespan",
             "type": "pie",
@@ -1512,7 +1523,7 @@ def _render_lc_security_bar_chart(df, key_prefix=""):
 
     categories = ['🔒 Secure', '🔓 Non-Secure']
     values = [secure_count, non_secure_count]
-    colors = ['#2ca02c', '#d62728']
+    colors = ['#27AE60', '#E74C3C']
 
     fig = go.Figure(data=[
         go.Bar(
@@ -1563,7 +1574,7 @@ def _render_lc_security_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#d62728"],
+        "color": ["#27AE60", "#E74C3C"],
         "series": [{
             "name": "Security",
             "type": "pie",
@@ -1605,7 +1616,7 @@ def _render_lc_security_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#d62728"],
+        "color": ["#27AE60", "#E74C3C"],
         "series": [{
             "name": "Security",
             "type": "pie",
@@ -1647,7 +1658,7 @@ def _render_lc_security_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#d62728"],
+        "color": ["#27AE60", "#E74C3C"],
         "series": [{
             "name": "Security",
             "type": "pie",
@@ -1691,7 +1702,7 @@ def _render_lc_summary_bar_chart(df, key_prefix=""):
 
     metrics = ['Total Objects', 'Temp Tables', 'Short-Lived', 'Secure Views']
     values = [total_objects, temp_tables, short_lived, secure_views]
-    colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#9467bd']
+    colors = ['#29B5E8', '#27AE60', '#E8A229', '#0077B6']
 
     fig = go.Figure(data=[
         go.Bar(
@@ -1749,7 +1760,7 @@ def _render_lc_summary_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ff7f0e", "#9467bd", "#1f77b4"],
+        "color": ["#27AE60", "#E8A229", "#0077B6", "#29B5E8"],
         "series": [{
             "name": "Summary",
             "type": "pie",
@@ -1798,7 +1809,7 @@ def _render_lc_summary_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ff7f0e", "#9467bd", "#1f77b4"],
+        "color": ["#27AE60", "#E8A229", "#0077B6", "#29B5E8"],
         "series": [{
             "name": "Summary",
             "type": "pie",
@@ -1847,7 +1858,7 @@ def _render_lc_summary_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#ff7f0e", "#9467bd", "#1f77b4"],
+        "color": ["#27AE60", "#E8A229", "#0077B6", "#29B5E8"],
         "series": [{
             "name": "Summary",
             "type": "pie",
@@ -1892,14 +1903,14 @@ def _render_obj_sum_count_bar_chart(df, key_prefix=""):
     # Color mapping based on metric type
     def get_color(metric):
         if 'Stacked' in metric:
-            return '#1f77b4'
+            return '#29B5E8'
         elif 'Temporary' in metric:
-            return '#2ca02c'
+            return '#27AE60'
         elif 'Short-Lived' in metric:
-            return '#ff7f0e'
+            return '#E8A229'
         elif 'Secure' in metric:
-            return '#9467bd'
-        return '#1f77b4'
+            return '#0077B6'
+        return '#29B5E8'
 
     colors = [get_color(m) for m in plot_df['METRIC_NAME']]
 
@@ -1954,7 +1965,7 @@ def _render_obj_sum_count_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"],
+        "color": ["#29B5E8", "#E8A229", "#27AE60", "#E74C3C", "#0077B6"],
         "series": [{
             "name": "Metrics",
             "type": "pie",
@@ -1997,7 +2008,7 @@ def _render_obj_sum_count_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"],
+        "color": ["#29B5E8", "#E8A229", "#27AE60", "#E74C3C", "#0077B6"],
         "series": [{
             "name": "Metrics",
             "type": "pie",
@@ -2040,7 +2051,7 @@ def _render_obj_sum_count_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"],
+        "color": ["#29B5E8", "#E8A229", "#27AE60", "#E74C3C", "#0077B6"],
         "series": [{
             "name": "Metrics",
             "type": "pie",
@@ -2090,7 +2101,7 @@ def _render_obj_sum_dist_bar_chart(df, key_prefix=""):
             y=plot_df['METRIC_NAME'],
             x=plot_df['PERCENTAGE'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{val:.1f}%" for val in plot_df['PERCENTAGE']],
             textposition='outside',
             textfont=dict(size=10),
@@ -2136,7 +2147,7 @@ def _render_obj_sum_dist_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -2180,7 +2191,7 @@ def _render_obj_sum_dist_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -2224,7 +2235,7 @@ def _render_obj_sum_dist_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F"],
         "series": [{
             "name": "Distribution",
             "type": "pie",
@@ -2266,7 +2277,7 @@ def _render_obj_sum_cat_bar_chart(df, key_prefix=""):
 
     categories = ['📊 View Depth Analysis', '🔄 Lifecycle Objects']
     values = [view_depth_count, lifecycle_count]
-    colors = ['#1f77b4', '#2ca02c']
+    colors = ['#29B5E8', '#27AE60']
 
     fig = go.Figure(data=[
         go.Bar(
@@ -2317,7 +2328,7 @@ def _render_obj_sum_cat_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#2ca02c"],
+        "color": ["#29B5E8", "#27AE60"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -2359,7 +2370,7 @@ def _render_obj_sum_cat_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#2ca02c"],
+        "color": ["#29B5E8", "#27AE60"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -2401,7 +2412,7 @@ def _render_obj_sum_cat_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#1f77b4", "#2ca02c"],
+        "color": ["#29B5E8", "#27AE60"],
         "series": [{
             "name": "Category",
             "type": "pie",
@@ -2449,7 +2460,7 @@ def _render_obj_sum_top_bar_chart(df, key_prefix=""):
             y=plot_df['METRIC_NAME'],
             x=plot_df['COUNT_OBJECTS'],
             orientation='h',
-            marker_color='#9467bd',
+            marker_color='#0077B6',
             text=[f"{int(val):,}" for val in plot_df['COUNT_OBJECTS']],
             textposition='outside',
             textfont=dict(size=10),
@@ -2497,7 +2508,7 @@ def _render_obj_sum_top_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
         "series": [{
             "name": "Top Metrics",
             "type": "pie",
@@ -2542,7 +2553,7 @@ def _render_obj_sum_top_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
         "series": [{
             "name": "Top Metrics",
             "type": "pie",
@@ -2587,7 +2598,7 @@ def _render_obj_sum_top_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
         "series": [{
             "name": "Top Metrics",
             "type": "pie",

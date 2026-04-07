@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_cicd_automation(entry_actions=None):
     """CI/CD Tool Automation Component
 
@@ -25,7 +39,7 @@ def comp_cicd_automation(entry_actions=None):
             from snowflake.snowpark.context import get_active_session
             session = get_active_session()
         except Exception as e:
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -78,9 +92,9 @@ def comp_cicd_automation(entry_actions=None):
 
             # Execute query
             try:
-                df = session.sql(query).to_pandas()
+                df = _cached_sql("rd_cicd_automation", query)
             except Exception as e:
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 return
@@ -102,7 +116,6 @@ def comp_cicd_automation(entry_actions=None):
             # Display the dataframe
             st.dataframe(
                 df,
-                hide_index=True
             )
 
             # Charts Section - 2 charts per row
@@ -112,16 +125,16 @@ def comp_cicd_automation(entry_actions=None):
             # Row 1: Two charts
             col1, col2 = st.columns(2)
 
-            with col1.container(border=True):
+            with col1.container():
                 st.markdown("##### DDL Operations by Deployment Agent")
                 _render_ddl_operations_chart(df, key_prefix="ddl_ops_")
 
-            with col2.container(border=True):
+            with col2.container():
                 st.markdown("##### Session Count by Deployment Agent")
                 _render_session_count_chart(df, key_prefix="session_")
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -159,7 +172,7 @@ def _render_ddl_ops_bar_chart(df, key_prefix=""):
             y=plot_df['DEPLOYMENT_AGENT'],
             x=plot_df['DDL_OPERATIONS_COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val):,}" for val in plot_df['DDL_OPERATIONS_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -324,7 +337,7 @@ def _render_session_bar_chart(df, key_prefix=""):
             y=plot_df['DEPLOYMENT_AGENT'],
             x=plot_df['SESSION_COUNT'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{int(val):,}" for val in plot_df['SESSION_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -366,7 +379,7 @@ def _render_session_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Sessions",
             "type": "pie",
@@ -405,7 +418,7 @@ def _render_session_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Sessions",
             "type": "pie",
@@ -444,7 +457,7 @@ def _render_session_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Sessions",
             "type": "pie",

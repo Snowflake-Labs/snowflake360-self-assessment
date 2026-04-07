@@ -13,6 +13,20 @@ except ImportError:
     def st_echarts(**kwargs):
         import streamlit as st
         st.info("Chart unavailable (echarts not supported in SiS)")
+
+
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
 import plotly.graph_objects as go
 
 
@@ -77,14 +91,15 @@ def comp_authentication(entry_actions=None):
 
             _render_provisioning_method_content()
 
-        with st.expander("Trust Center (Scanner Status)", expanded=False):
+        with st.expander("Trust Center (Scanner Status)", expanded=True):
             st.markdown("#### Trust Center (Scanner Status)")
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        'ℹ️&nbsp;&nbsp;Content for Trust Center (Scanner Status) will be implemented here.'
-                        '</div>', unsafe_allow_html=True)
+            _render_trust_center_scanner()
+
+        with st.expander("Programmatic Access Token (PAT) Users", expanded=True):
+            _render_pat_users()
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading Authentication: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -107,7 +122,7 @@ GROUP BY ALL
 ORDER BY login_attempts DESC
 """
 
-        auth_activity_df = st.session_state.session.sql(auth_activity_query).to_pandas()
+        auth_activity_df = _cached_sql("authn_auth_activity", auth_activity_query)
 
         if not auth_activity_df.empty:
             st.dataframe(
@@ -120,31 +135,31 @@ ORDER BY login_attempts DESC
 
             chart_col1, chart_col2 = st.columns(2)
 
-            with chart_col1.container(border=True):
+            with chart_col1.container():
                 st.markdown("**Login Attempts by Auth Method**")
                 _render_auth_method_chart(auth_activity_df, key_prefix="auth_method_")
 
-            with chart_col2.container(border=True):
+            with chart_col2.container():
                 st.markdown("**Login Attempts by Status**")
                 _render_status_chart(auth_activity_df, key_prefix="status_")
 
             chart_col3, chart_col4 = st.columns(2)
 
-            with chart_col3.container(border=True):
+            with chart_col3.container():
                 st.markdown("**Login Attempts by Client Type**")
                 _render_client_type_chart(auth_activity_df, key_prefix="client_type_")
 
-            with chart_col4.container(border=True):
+            with chart_col4.container():
                 st.markdown("**Unique IPs by Auth Method**")
                 _render_unique_ips_chart(auth_activity_df, key_prefix="unique_ips_")
 
         else:
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;No authentication activity data available for the last 30 days.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading authentication activity: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -171,7 +186,7 @@ WHERE deleted_on IS NULL
 GROUP BY ALL
 """
 
-        credential_hygiene_df = st.session_state.session.sql(credential_hygiene_query).to_pandas()
+        credential_hygiene_df = _cached_sql("authn_credential_hygiene", credential_hygiene_query)
 
         if not credential_hygiene_df.empty:
             st.dataframe(
@@ -184,21 +199,21 @@ GROUP BY ALL
 
             chart_col1, chart_col2 = st.columns(2)
 
-            with chart_col1.container(border=True):
+            with chart_col1.container():
                 st.markdown("**User Distribution by Auth Profile**")
                 _render_auth_profile_chart(credential_hygiene_df, key_prefix="auth_profile_")
 
-            with chart_col2.container(border=True):
+            with chart_col2.container():
                 st.markdown("**Inactive Keypair Users by Auth Profile**")
                 _render_inactive_keypair_chart(credential_hygiene_df, key_prefix="inactive_keypair_")
 
         else:
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;No credential hygiene data available.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading credential hygiene data: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -230,7 +245,7 @@ FROM SNOWFLAKE.ACCOUNT_USAGE.SESSION_POLICIES
 WHERE deleted IS NULL
 """
 
-        policy_audit_df = st.session_state.session.sql(policy_audit_query).to_pandas()
+        policy_audit_df = _cached_sql("authn_policy_audit", policy_audit_query)
 
         if not policy_audit_df.empty:
             st.dataframe(
@@ -243,21 +258,21 @@ WHERE deleted IS NULL
 
             chart_col1, chart_col2 = st.columns(2)
 
-            with chart_col1.container(border=True):
+            with chart_col1.container():
                 st.markdown("**Policy Count by Type**")
                 _render_policy_type_chart(policy_audit_df, key_prefix="policy_type_")
 
-            with chart_col2.container(border=True):
+            with chart_col2.container():
                 st.markdown("**Password Policy Settings Comparison**")
                 _render_password_policy_settings_chart(policy_audit_df, key_prefix="pwd_policy_settings_")
 
         else:
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;No password or session policies configured in this account.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading policy audit data: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -280,7 +295,7 @@ GROUP BY ALL
 ORDER BY role_count DESC
 """
 
-        provisioning_method_df = st.session_state.session.sql(provisioning_method_query).to_pandas()
+        provisioning_method_df = _cached_sql("authn_provisioning_method", provisioning_method_query)
 
         if not provisioning_method_df.empty:
             st.dataframe(
@@ -293,21 +308,21 @@ ORDER BY role_count DESC
 
             chart_col1, chart_col2 = st.columns(2)
 
-            with chart_col1.container(border=True):
+            with chart_col1.container():
                 st.markdown("**Role Distribution by Provisioning Method**")
                 _render_provisioning_method_chart(provisioning_method_df, key_prefix="prov_method_")
 
-            with chart_col2.container(border=True):
+            with chart_col2.container():
                 st.markdown("**Role Count by Owner Role (Top 10)**")
                 _render_owner_role_chart(provisioning_method_df, key_prefix="owner_role_")
 
         else:
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;No role provisioning data available.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading provisioning method data: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -330,7 +345,7 @@ def _render_auth_method_chart(df, key_prefix=""):
     }).reset_index().sort_values('LOGIN_ATTEMPTS', ascending=False)
 
     if auth_method_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -359,7 +374,7 @@ def _render_status_chart(df, key_prefix=""):
     }).reset_index().sort_values('LOGIN_ATTEMPTS', ascending=False)
 
     if status_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -388,7 +403,7 @@ def _render_client_type_chart(df, key_prefix=""):
     }).reset_index().sort_values('LOGIN_ATTEMPTS', ascending=False)
 
     if client_type_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -417,7 +432,7 @@ def _render_unique_ips_chart(df, key_prefix=""):
     }).reset_index().sort_values('UNIQUE_IPS', ascending=False)
 
     if unique_ips_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -449,7 +464,7 @@ def _render_auth_profile_chart(df, key_prefix=""):
     auth_profile_df = auth_profile_df.sort_values('USER_COUNT', ascending=False)
 
     if auth_profile_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -477,7 +492,7 @@ def _render_inactive_keypair_chart(df, key_prefix=""):
     inactive_df = inactive_df.sort_values('INACTIVE_KEYPAIR_USERS', ascending=False)
 
     if inactive_df.empty:
-        st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     '✅&nbsp;&nbsp;No inactive keypair users detected - all keypair credentials are active.'
                     '</div>', unsafe_allow_html=True)
         return
@@ -509,7 +524,7 @@ def _render_policy_type_chart(df, key_prefix=""):
     policy_type_df = policy_type_df.sort_values('POLICY_COUNT', ascending=False)
 
     if policy_type_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -536,7 +551,7 @@ def _render_password_policy_settings_chart(df, key_prefix=""):
     password_policies_df = df[df['POLICY_TYPE'] == 'Password Policy'].copy()
 
     if password_policies_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No password policies configured - only session policies exist.'
                     '</div>', unsafe_allow_html=True)
         return
@@ -577,7 +592,7 @@ def _render_provisioning_method_chart(df, key_prefix=""):
     }).reset_index().sort_values('ROLE_COUNT', ascending=False)
 
     if prov_method_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -605,7 +620,7 @@ def _render_owner_role_chart(df, key_prefix=""):
     owner_role_df = owner_role_df.sort_values('ROLE_COUNT', ascending=False).head(10)
 
     if owner_role_df.empty:
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;No data available for chart'
                     '</div>', unsafe_allow_html=True)
         return
@@ -654,7 +669,7 @@ def _render_generic_bar_chart(df, category_col, value_col, value_label, key_pref
                 "name": value_label,
                 "type": "bar",
                 "data": values,
-                "itemStyle": {"color": "#5470c6"},
+                "itemStyle": {"color": "#29B5E8"},
                 "label": {
                     "show": True,
                     "position": "top",
@@ -767,3 +782,120 @@ def _render_generic_rose_chart(df, category_col, value_col, value_unit, key_pref
     }
 
     st_echarts(options=option, height="350px", key=f"{key_prefix}rose_chart")
+
+
+def _render_trust_center_scanner():
+    import plotly.graph_objects as go
+    import pandas as pd
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Snowflake Trust Center</b> continuously scans your account for security risks. '
+        'This view shows the distribution of open findings by severity and scanner type, helping you '
+        'prioritise remediation efforts.</div>', unsafe_allow_html=True)
+    try:
+        session = st.session_state.session
+        findings_query = """
+        SELECT
+            SCANNER_NAME,
+            FINDING_TYPE,
+            SEVERITY,
+            STATUS,
+            COUNT(*) AS finding_count,
+            MAX(DETECTED_AT) AS last_detected
+        FROM SNOWFLAKE.ACCOUNT_USAGE.TRUST_CENTER_FINDINGS
+        WHERE STATUS != 'RESOLVED'
+        GROUP BY SCANNER_NAME, FINDING_TYPE, SEVERITY, STATUS
+        ORDER BY
+            CASE SEVERITY WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
+            finding_count DESC
+        """
+        df = _cached_sql("authn_findings", findings_query)
+        if df.empty:
+            st.success("No open Trust Center findings — your account is clean!")
+            return
+        df['FINDING_COUNT'] = pd.to_numeric(df['FINDING_COUNT'], errors='coerce').fillna(0)
+        sev_counts = df.groupby('SEVERITY')['FINDING_COUNT'].sum().reset_index()
+        col1, col2, col3, col4 = st.columns(4)
+        _sev_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
+        sev_counts = sev_counts.sort_values('SEVERITY', key=lambda x: x.map(_sev_order).fillna(99))
+        _sev_colors = {'CRITICAL': '#E74C3C', 'HIGH': '#E8A229', 'MEDIUM': '#75C2D8', 'LOW': '#29B5E8'}
+        with col1:
+            critical = int(sev_counts[sev_counts['SEVERITY'] == 'CRITICAL']['FINDING_COUNT'].sum())
+            st.metric("Critical", critical)
+        with col2:
+            high = int(sev_counts[sev_counts['SEVERITY'] == 'HIGH']['FINDING_COUNT'].sum())
+            st.metric("High", high)
+        with col3:
+            medium = int(sev_counts[sev_counts['SEVERITY'] == 'MEDIUM']['FINDING_COUNT'].sum())
+            st.metric("Medium", medium)
+        with col4:
+            low = int(sev_counts[sev_counts['SEVERITY'] == 'LOW']['FINDING_COUNT'].sum())
+            st.metric("Low", low)
+        col_a, col_b = st.columns(2)
+        with col_a:
+            fig_sev = go.Figure(go.Pie(
+                labels=sev_counts['SEVERITY'],
+                values=sev_counts['FINDING_COUNT'],
+                hole=0.35,
+                marker_colors=[_sev_colors.get(s, '#ADE8F4') for s in sev_counts['SEVERITY']]
+            ))
+            fig_sev.update_layout(title='Findings by Severity', height=320, margin=dict(t=50, b=20))
+            st.plotly_chart(fig_sev, use_container_width=True)
+        with col_b:
+            scanner_counts = df.groupby('SCANNER_NAME')['FINDING_COUNT'].sum().reset_index().sort_values('FINDING_COUNT', ascending=True)
+            fig_scanner = go.Figure(go.Bar(
+                y=scanner_counts['SCANNER_NAME'], x=scanner_counts['FINDING_COUNT'],
+                orientation='h', marker_color='#11567F',
+                text=scanner_counts['FINDING_COUNT'], textposition='outside'
+            ))
+            fig_scanner.update_layout(
+                title='Findings by Scanner', xaxis_title='Count',
+                height=320, margin=dict(t=50, l=180, r=40, b=40)
+            )
+            st.plotly_chart(fig_scanner, use_container_width=True)
+        st.markdown("**Open Trust Center Findings**")
+        st.dataframe(df[['SCANNER_NAME', 'FINDING_TYPE', 'SEVERITY', 'STATUS', 'FINDING_COUNT', 'LAST_DETECTED']])
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+
+
+def _render_pat_users():
+    import plotly.graph_objects as go
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>PAT Users:</b> Users with Programmatic Access Tokens enabled for API authentication.</div>',
+        unsafe_allow_html=True)
+    try:
+        query = """
+        SELECT
+            name AS user_name, type AS user_type, default_role, last_success_login,
+            DATEDIFF('day', last_success_login, CURRENT_TIMESTAMP()) AS days_since_login,
+            CASE
+                WHEN last_success_login < DATEADD('day', -90, CURRENT_TIMESTAMP()) OR last_success_login IS NULL THEN 'INACTIVE'
+                ELSE 'ACTIVE'
+            END AS activity_status
+        FROM SNOWFLAKE.ACCOUNT_USAGE.USERS
+        WHERE deleted_on IS NULL AND has_pat = 'true'
+        ORDER BY last_success_login DESC NULLS LAST
+        """
+        df = _cached_sql("ac_pat_users", query)
+        if df.empty:
+            st.info("No users with Programmatic Access Tokens found.")
+            return
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("PAT Users", len(df))
+        with col2:
+            active = len(df[df['ACTIVITY_STATUS'] == 'ACTIVE'])
+            st.metric("Active PAT Users (90d)", active)
+        status_counts = df.groupby('ACTIVITY_STATUS').size().reset_index(name='COUNT')
+        fig = go.Figure(go.Pie(
+            labels=status_counts['ACTIVITY_STATUS'], values=status_counts['COUNT'],
+            hole=0.3, marker=dict(colors=['#29B5E8', '#E8A229']),
+            textinfo='label+value'
+        ))
+        fig.update_layout(title='PAT Users Activity Status', height=320, margin=dict(t=50, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df)
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)

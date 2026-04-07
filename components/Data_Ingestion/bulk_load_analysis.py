@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_bulk_load_analysis(entry_actions=None):
     """
     Bulk Load (COPY INTO) Analysis Component
@@ -24,7 +38,7 @@ def comp_bulk_load_analysis(entry_actions=None):
             from snowflake.snowpark.context import get_active_session
             session = get_active_session()
         except Exception as e:
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -69,9 +83,9 @@ def comp_bulk_load_analysis(entry_actions=None):
         """
 
         try:
-            df = session.sql(query).to_pandas()
+            df = _cached_sql("ig_bulk_load", query)
         except Exception as e:
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -88,7 +102,6 @@ def comp_bulk_load_analysis(entry_actions=None):
             st.dataframe(
                 df,
                 use_container_width=True,
-                hide_index=True
             )
 
             st.markdown("---")
@@ -96,26 +109,26 @@ def comp_bulk_load_analysis(entry_actions=None):
 
             col1, col2 = st.columns(2)
 
-            with col1.container(border=True):
+            with col1.container():
                 st.markdown("##### Top Tables by Total Volume Ingested (GB)")
                 _render_volume_chart(df, key_prefix="vol_")
 
-            with col2.container(border=True):
+            with col2.container():
                 st.markdown("##### Load Events Distribution")
                 _render_load_events_chart(df, key_prefix="events_")
 
             col3, col4 = st.columns(2)
 
-            with col3.container(border=True):
+            with col3.container():
                 st.markdown("##### Average File Size by Table (MB)")
                 _render_avg_file_size_chart(df, key_prefix="avgfile_")
 
-            with col4.container(border=True):
+            with col4.container():
                 st.markdown("##### Health Check Summary")
                 _render_health_check_chart(df, key_prefix="health_")
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -148,7 +161,7 @@ def _render_volume_bar_chart(df, key_prefix=""):
             y=plot_df['TARGET_TABLE'],
             x=plot_df['TOTAL_GB'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{val:.2f} GB" for val in plot_df['TOTAL_GB']],
             textposition='outside',
             textfont=dict(size=10),
@@ -313,7 +326,7 @@ def _render_events_bar_chart(df, key_prefix=""):
             y=plot_df['TARGET_TABLE'],
             x=plot_df['LOAD_EVENTS'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{int(val)}" for val in plot_df['LOAD_EVENTS']],
             textposition='outside',
             textfont=dict(size=10),
@@ -358,7 +371,7 @@ def _render_events_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Events",
             "type": "pie",
@@ -398,7 +411,7 @@ def _render_events_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Events",
             "type": "pie",
@@ -438,7 +451,7 @@ def _render_events_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Events",
             "type": "pie",
@@ -481,7 +494,7 @@ def _render_avg_file_bar_chart(df, key_prefix=""):
             y=plot_df['TARGET_TABLE'],
             x=plot_df['AVG_FILE_MB'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#27AE60',
             text=[f"{val:.1f} MB" for val in plot_df['AVG_FILE_MB']],
             textposition='outside',
             textfont=dict(size=10),
@@ -526,7 +539,7 @@ def _render_avg_file_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Avg File Size",
             "type": "pie",
@@ -566,7 +579,7 @@ def _render_avg_file_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Avg File Size",
             "type": "pie",
@@ -606,7 +619,7 @@ def _render_avg_file_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Avg File Size",
             "type": "pie",
@@ -650,9 +663,9 @@ def _render_health_bar_chart(df, key_prefix=""):
     colors = []
     for status in health_counts['STATUS']:
         if '✅' in status:
-            colors.append('#2ca02c')
+            colors.append('#27AE60')
         else:
-            colors.append('#d62728')
+            colors.append('#E74C3C')
 
     fig = go.Figure(data=[
         go.Bar(
@@ -689,11 +702,11 @@ def _render_health_pie_chart(df, key_prefix=""):
     colors = []
     for status in health_counts.index:
         if '✅' in status:
-            colors.append('#2ca02c')
+            colors.append('#27AE60')
         elif 'High Variance' in status:
-            colors.append('#d62728')
+            colors.append('#E74C3C')
         else:
-            colors.append('#ff7f0e')
+            colors.append('#E8A229')
 
     option = {
         "legend": {
@@ -738,11 +751,11 @@ def _render_health_donut_chart(df, key_prefix=""):
     colors = []
     for status in health_counts.index:
         if '✅' in status:
-            colors.append('#2ca02c')
+            colors.append('#27AE60')
         elif 'High Variance' in status:
-            colors.append('#d62728')
+            colors.append('#E74C3C')
         else:
-            colors.append('#ff7f0e')
+            colors.append('#E8A229')
 
     option = {
         "legend": {
@@ -787,11 +800,11 @@ def _render_health_rose_chart(df, key_prefix=""):
     colors = []
     for status in health_counts.index:
         if '✅' in status:
-            colors.append('#2ca02c')
+            colors.append('#27AE60')
         elif 'High Variance' in status:
-            colors.append('#d62728')
+            colors.append('#E74C3C')
         else:
-            colors.append('#ff7f0e')
+            colors.append('#E8A229')
 
     option = {
         "legend": {

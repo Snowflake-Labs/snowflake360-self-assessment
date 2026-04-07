@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from concurrent.futures import ThreadPoolExecutor, as_completed
 try:
     from streamlit_echarts import st_echarts
 except ImportError:
@@ -11,6 +12,52 @@ from .problematic_query_report import comp_problematic_query_report
 from .syntax_hunter import comp_syntax_hunter
 from .object_structure_analysis import comp_object_structure_analysis
 from .workload_shape import comp_workload_shape
+from ._all_tf_queries import _ALL_TF_QUERIES
+
+
+def _run_query_thread(session, key, sql):
+    try:
+        return key, session.sql(sql).to_pandas(), None
+    except Exception as e:
+        return key, pd.DataFrame(), e
+
+
+def _prefetch_all_tf_queries(progress_bar=None, status_text=None):
+    session = st.session_state.get("session")
+    if not session:
+        return
+    needed = {k: sql for k, sql in _ALL_TF_QUERIES.items() if k not in st.session_state}
+    if not needed:
+        return
+    total = len(needed)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_run_query_thread, session, k, sql): k
+            for k, sql in needed.items()
+        }
+        for future in as_completed(futures):
+            key, df, err = future.result()
+            st.session_state[key] = df
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.progress(completed / total)
+            if status_text is not None:
+                status_text.text(f"Loading data... ({completed}/{total} queries)")
+
+
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
 
 
 def comp_transformation_overview(entry_actions=None):
@@ -28,14 +75,26 @@ def comp_transformation_overview(entry_actions=None):
         entry_actions: Optional callback actions on component entry
     """
     try:
-        sub_tab_names = [
+        status_ph = st.empty()
+        progress_ph = st.empty()
+        all_cached = all(k in st.session_state for k in _ALL_TF_QUERIES)
+        if not all_cached:
+            status_ph.markdown(
+                '<p style="color: #003D73; font-weight: 600;">Loading Data Transformation data...</p>',
+                unsafe_allow_html=True)
+            progress_bar_widget = progress_ph.progress(0)
+            _prefetch_all_tf_queries(progress_bar=progress_bar_widget, status_text=status_ph)
+            progress_ph.empty()
+            status_ph.empty()
+        else:
+            _prefetch_all_tf_queries()
+        sub_tabs = st.tabs([
             "Overview",
             "Problematic Query - Report (Native Insights)",
             "Syntax Hunter (Regex & Heuristics)",
             "Object Structure Analysis (Stacked Views & Security)",
             "Workload Shape (Updates, MVs, RAPs)"
-        ]
-        sub_tabs = st.tabs(sub_tab_names)
+        ])
 
         with sub_tabs[0]:
             _render_overview_content()
@@ -53,7 +112,7 @@ def comp_transformation_overview(entry_actions=None):
             comp_workload_shape()
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading Data Transformation Overview: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -67,7 +126,7 @@ def _render_overview_content():
             session = get_active_session()
         except Exception as e:
             # st.error(f"Unable to get Snowflake session: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -253,10 +312,10 @@ CROSS JOIN high_cloud_services hc
 
         # Execute query
         try:
-            df = session.sql(query).to_pandas()
+            df = _cached_sql("tf_overview", query)
         except Exception as e:
             # st.error(f"Error executing query: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -309,7 +368,6 @@ CROSS JOIN high_cloud_services hc
             # Display the dataframe
             st.dataframe(
                 df,
-                hide_index=True
             )
 
             # Charts Section
@@ -322,27 +380,33 @@ CROSS JOIN high_cloud_services hc
             # Row 1: Two charts
             col1, col2 = st.columns(2)
 
-            with col1.container(border=True):
+            with col1.container():
                 st.markdown("##### Table Clustering Distribution")
                 _render_clustering_chart(row, key_prefix="clustering_")
 
-            with col2.container(border=True):
+            with col2.container():
                 st.markdown("##### Table Types Distribution")
                 _render_table_types_chart(row, key_prefix="table_types_")
 
             # Row 2: Two charts
             col3, col4 = st.columns(2)
 
-            with col3.container(border=True):
+            with col3.container():
                 st.markdown("##### Warehouse Performance Issues (30 Days)")
                 _render_warehouse_issues_chart(row, key_prefix="wh_issues_")
 
-            with col4.container(border=True):
+            with col4.container():
                 st.markdown("##### Query & Usage Patterns (30 Days)")
                 _render_query_patterns_chart(row, key_prefix="query_patterns_")
 
+        with st.expander("Object Lifecycle Listing", expanded=True):
+            _render_object_lifecycle()
+
+        with st.expander("Micro-Transaction Pattern (Short UPSERTs)", expanded=True):
+            _render_micro_transaction_pattern()
+
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -353,21 +417,9 @@ CROSS JOIN high_cloud_services hc
 
 def _render_clustering_chart(row, key_prefix=""):
     """Render table clustering distribution chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
 
-    if chart_type == "Bar Chart":
-        _render_clustering_bar_chart(row, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_clustering_pie_chart(row, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_clustering_donut_chart(row, key_prefix)
-    else:
-        _render_clustering_rose_chart(row, key_prefix)
+
+    _render_clustering_bar_chart(row, key_prefix)
 
 
 def _render_clustering_bar_chart(row, key_prefix=""):
@@ -389,7 +441,7 @@ def _render_clustering_bar_chart(row, key_prefix=""):
             y=categories_sorted,
             x=values_sorted,
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val)}" for val in values_sorted],
             textposition='outside',
             textfont=dict(size=10),
@@ -524,23 +576,110 @@ def _render_clustering_rose_chart(row, key_prefix=""):
     st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
 
 
+def _render_object_lifecycle():
+    import plotly.graph_objects as go
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Object Lifecycle:</b> Tables grouped by age (since creation) and type. '
+        'Helps identify stale or legacy objects that may need review.</div>',
+        unsafe_allow_html=True)
+    try:
+        query = """
+        SELECT
+            CASE
+                WHEN DATEDIFF('day', created, CURRENT_TIMESTAMP()) <= 30 THEN '0-30 days'
+                WHEN DATEDIFF('day', created, CURRENT_TIMESTAMP()) <= 90 THEN '31-90 days'
+                WHEN DATEDIFF('day', created, CURRENT_TIMESTAMP()) <= 365 THEN '91-365 days'
+                ELSE '365+ days'
+            END AS age_bucket,
+            table_type,
+            COUNT(*) AS object_count
+        FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+        WHERE deleted IS NULL
+          AND table_catalog != 'SNOWFLAKE'
+          AND table_schema != 'INFORMATION_SCHEMA'
+        GROUP BY age_bucket, table_type
+        ORDER BY age_bucket, object_count DESC
+        """
+        df = _cached_sql("dt_object_lifecycle", query)
+        if df.empty:
+            st.info("No table lifecycle data available.")
+            return
+        df['OBJECT_COUNT'] = pd.to_numeric(df['OBJECT_COUNT'], errors='coerce').fillna(0)
+        pivot = df.pivot_table(index='AGE_BUCKET', columns='TABLE_TYPE', values='OBJECT_COUNT', aggfunc='sum', fill_value=0)
+        bucket_order = ['0-30 days', '31-90 days', '91-365 days', '365+ days']
+        pivot = pivot.reindex([b for b in bucket_order if b in pivot.index])
+        colors = ['#29B5E8', '#11567F', '#75C2D8', '#E8A229', '#1A7DA8', '#023E8A']
+        fig = go.Figure()
+        for i, col in enumerate(pivot.columns):
+            fig.add_trace(go.Bar(name=col, x=pivot.index, y=pivot[col], marker_color=colors[i % len(colors)]))
+        fig.update_layout(
+            barmode='stack', title='Object Count by Age and Type',
+            xaxis_title='Age Bucket', yaxis_title='Object Count',
+            height=380, margin=dict(t=50, b=60),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df)
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+
+
+def _render_micro_transaction_pattern():
+    import plotly.graph_objects as go
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Micro-Transaction Pattern:</b> Short UPSERT/MERGE operations (execution <500ms) '
+        'that may indicate row-level transactional workloads better suited for batching or hybrid tables.</div>',
+        unsafe_allow_html=True)
+    try:
+        query = """
+        SELECT
+            warehouse_name,
+            database_name,
+            COUNT(*) AS short_upsert_count,
+            ROUND(AVG(total_elapsed_time), 1) AS avg_elapsed_ms,
+            ROUND(SUM(credits_used_cloud_services), 4) AS cloud_services_credits,
+            COUNT(DISTINCT user_name) AS distinct_users
+        FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+        WHERE start_time >= DATEADD('day', -30, CURRENT_DATE)
+          AND query_type IN ('MERGE', 'UPDATE', 'INSERT')
+          AND total_elapsed_time < 500
+          AND rows_produced <= 10
+        GROUP BY warehouse_name, database_name
+        HAVING COUNT(*) > 50
+        ORDER BY short_upsert_count DESC
+        LIMIT 20
+        """
+        df = _cached_sql("dt_micro_tx", query)
+        if df.empty:
+            st.success("No significant micro-transaction patterns detected.")
+            return
+        df['SHORT_UPSERT_COUNT'] = pd.to_numeric(df['SHORT_UPSERT_COUNT'], errors='coerce').fillna(0)
+        st.metric("Total Micro-Transaction Operations (30d)", int(df['SHORT_UPSERT_COUNT'].sum()))
+        df['LABEL'] = df['DATABASE_NAME'] + ' / ' + df['WAREHOUSE_NAME']
+        fig = go.Figure(go.Bar(
+            y=df['LABEL'].head(15), x=df['SHORT_UPSERT_COUNT'].head(15),
+            orientation='h', marker_color='#E8A229',
+            text=df['SHORT_UPSERT_COUNT'].head(15).astype(int), textposition='outside'
+        ))
+        fig.update_layout(
+            title='Top Micro-Transaction Sources',
+            xaxis_title='Operation Count', height=max(300, 15 * 30 + 80),
+            margin=dict(t=50, l=250, r=40, b=60)
+        )
+        fig.update_yaxes(autorange='reversed')
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe(df)
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+
+
 def _render_table_types_chart(row, key_prefix=""):
     """Render table types distribution chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
 
-    if chart_type == "Bar Chart":
-        _render_table_types_bar_chart(row, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_table_types_pie_chart(row, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_table_types_donut_chart(row, key_prefix)
-    else:
-        _render_table_types_rose_chart(row, key_prefix)
+
+    _render_table_types_bar_chart(row, key_prefix)
 
 
 def _render_table_types_bar_chart(row, key_prefix=""):
@@ -565,7 +704,7 @@ def _render_table_types_bar_chart(row, key_prefix=""):
             y=categories_sorted,
             x=values_sorted,
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{int(val)}" for val in values_sorted],
             textposition='outside',
             textfont=dict(size=10),
@@ -611,7 +750,7 @@ def _render_table_types_pie_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "color": ["#E8A229", "#0077B6", "#F39C12", "#0077B6", "#11567F", "#75C2D8"],
         "series": [{
             "name": "Table Types",
             "type": "pie",
@@ -654,7 +793,7 @@ def _render_table_types_donut_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "color": ["#E8A229", "#0077B6", "#F39C12", "#0077B6", "#11567F", "#75C2D8"],
         "series": [{
             "name": "Table Types",
             "type": "pie",
@@ -697,7 +836,7 @@ def _render_table_types_rose_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2"],
+        "color": ["#E8A229", "#0077B6", "#F39C12", "#0077B6", "#11567F", "#75C2D8"],
         "series": [{
             "name": "Table Types",
             "type": "pie",
@@ -714,21 +853,9 @@ def _render_table_types_rose_chart(row, key_prefix=""):
 
 def _render_warehouse_issues_chart(row, key_prefix=""):
     """Render warehouse performance issues chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
 
-    if chart_type == "Bar Chart":
-        _render_warehouse_issues_bar_chart(row, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_warehouse_issues_pie_chart(row, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_warehouse_issues_donut_chart(row, key_prefix)
-    else:
-        _render_warehouse_issues_rose_chart(row, key_prefix)
+
+    _render_warehouse_issues_bar_chart(row, key_prefix)
 
 
 def _render_warehouse_issues_bar_chart(row, key_prefix=""):
@@ -749,7 +876,7 @@ def _render_warehouse_issues_bar_chart(row, key_prefix=""):
             y=categories_sorted,
             x=values_sorted,
             orientation='h',
-            marker_color='#d62728',
+            marker_color='#F39C12',
             text=[f"{int(val)}" for val in values_sorted],
             textposition='outside',
             textfont=dict(size=10),
@@ -791,7 +918,7 @@ def _render_warehouse_issues_pie_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#d62728", "#ff9896"],
+        "color": ["#F39C12", "#F39C12"],
         "series": [{
             "name": "WH Issues",
             "type": "pie",
@@ -830,7 +957,7 @@ def _render_warehouse_issues_donut_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#d62728", "#ff9896"],
+        "color": ["#F39C12", "#F39C12"],
         "series": [{
             "name": "WH Issues",
             "type": "pie",
@@ -869,7 +996,7 @@ def _render_warehouse_issues_rose_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#d62728", "#ff9896"],
+        "color": ["#F39C12", "#F39C12"],
         "series": [{
             "name": "WH Issues",
             "type": "pie",
@@ -886,21 +1013,9 @@ def _render_warehouse_issues_rose_chart(row, key_prefix=""):
 
 def _render_query_patterns_chart(row, key_prefix=""):
     """Render query and usage patterns chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
 
-    if chart_type == "Bar Chart":
-        _render_query_patterns_bar_chart(row, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_query_patterns_pie_chart(row, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_query_patterns_donut_chart(row, key_prefix)
-    else:
-        _render_query_patterns_rose_chart(row, key_prefix)
+
+    _render_query_patterns_bar_chart(row, key_prefix)
 
 
 def _render_query_patterns_bar_chart(row, key_prefix=""):
@@ -921,7 +1036,7 @@ def _render_query_patterns_bar_chart(row, key_prefix=""):
             y=categories_sorted,
             x=values_sorted,
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#0077B6',
             text=[f"{int(val):,}" for val in values_sorted],
             textposition='outside',
             textfont=dict(size=10),
@@ -963,7 +1078,7 @@ def _render_query_patterns_pie_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a"],
+        "color": ["#0077B6", "#0077B6"],
         "series": [{
             "name": "Query Patterns",
             "type": "pie",
@@ -1002,7 +1117,7 @@ def _render_query_patterns_donut_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a"],
+        "color": ["#0077B6", "#0077B6"],
         "series": [{
             "name": "Query Patterns",
             "type": "pie",
@@ -1041,7 +1156,7 @@ def _render_query_patterns_rose_chart(row, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a"],
+        "color": ["#0077B6", "#0077B6"],
         "series": [{
             "name": "Query Patterns",
             "type": "pie",

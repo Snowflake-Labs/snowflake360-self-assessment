@@ -13,6 +13,7 @@ entities:
     artifacts:
       - app.py
       - environment.yml
+      - .streamlit/
       - core/
       - components/
       - metrics/

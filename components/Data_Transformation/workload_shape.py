@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_workload_shape(entry_actions=None):
     """
     Workload Shape (Updates, MVs, RAPs) Component
@@ -23,7 +37,7 @@ def comp_workload_shape(entry_actions=None):
             session = get_active_session()
         except Exception as e:
             # st.error(f"Unable to get Snowflake session: {str(e)}")
-            st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
                         f'</div>', unsafe_allow_html=True)
             return
@@ -62,10 +76,10 @@ ORDER BY 2 DESC
 
             # Execute query
             try:
-                df = session.sql(query).to_pandas()
+                df = _cached_sql("tf_workload_shape", query)
             except Exception as e:
                 # st.error(f"Error executing query: {str(e)}")
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 df = pd.DataFrame()
@@ -89,7 +103,6 @@ ORDER BY 2 DESC
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section - 2 charts per row
@@ -99,22 +112,22 @@ ORDER BY 2 DESC
                 # Row 1: Two charts
                 col1, col2 = st.columns(2)
 
-                with col1.container(border=True):
+                with col1.container():
                     st.markdown("##### Top Queries by Execution Count")
                     _render_execution_count_chart(df, key_prefix="exec_count_")
 
-                with col2.container(border=True):
+                with col2.container():
                     st.markdown("##### Average Duration by Query Pattern (ms)")
                     _render_avg_duration_chart(df, key_prefix="avg_dur_")
 
                 # Row 2: Two charts
                 col3, col4 = st.columns(2)
 
-                with col3.container(border=True):
+                with col3.container():
                     st.markdown("##### Recommendation Distribution")
                     _render_recommendation_chart(df, key_prefix="rec_dist_")
 
-                with col4.container(border=True):
+                with col4.container():
                     st.markdown("##### Execution Count vs Duration Comparison")
                     _render_count_vs_duration_chart(df, key_prefix="count_dur_")
 
@@ -144,9 +157,9 @@ ORDER BY 3 DESC
 
             # Execute query
             try:
-                rap_df = session.sql(rap_query).to_pandas()
+                rap_df = _cached_sql("tf_rap_query", rap_query)
             except Exception as e:
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing RAP query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 rap_df = pd.DataFrame()
@@ -170,7 +183,6 @@ ORDER BY 3 DESC
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section - 2 charts per row
@@ -180,22 +192,22 @@ ORDER BY 3 DESC
                 # Row 1: Two charts
                 rap_col1, rap_col2 = st.columns(2)
 
-                with rap_col1.container(border=True):
+                with rap_col1.container():
                     st.markdown("##### Slow Query Count by Policy")
                     _render_rap_slow_query_count_chart(rap_df, key_prefix="rap_count_")
 
-                with rap_col2.container(border=True):
+                with rap_col2.container():
                     st.markdown("##### Average Execution Time by Table (ms)")
                     _render_rap_avg_execution_chart(rap_df, key_prefix="rap_avg_")
 
                 # Row 2: Two charts
                 rap_col3, rap_col4 = st.columns(2)
 
-                with rap_col3.container(border=True):
+                with rap_col3.container():
                     st.markdown("##### Slow Queries by Protected Table")
                     _render_rap_table_distribution_chart(rap_df, key_prefix="rap_table_")
 
-                with rap_col4.container(border=True):
+                with rap_col4.container():
                     st.markdown("##### Total Slow Query Time by Policy (ms)")
                     _render_rap_total_time_chart(rap_df, key_prefix="rap_time_")
 
@@ -220,10 +232,10 @@ ORDER BY 3 DESC
 
             # Execute query
             try:
-                mv_df = session.sql(mv_query).to_pandas()
+                mv_df = _cached_sql("tf_mv_refresh_cost", mv_query)
             except Exception as e:
                 # st.error(f"Error executing MV refresh cost query: {str(e)}")
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing MV refresh cost query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 mv_df = pd.DataFrame()
@@ -248,7 +260,6 @@ ORDER BY 3 DESC
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section - 2 charts per row
@@ -258,22 +269,22 @@ ORDER BY 3 DESC
                 # Row 1: Two charts
                 mv_col1, mv_col2 = st.columns(2)
 
-                with mv_col1.container(border=True):
+                with mv_col1.container():
                     st.markdown("##### Total Refresh Cost by MV (Credits)")
                     _render_mv_total_cost_chart(mv_df, key_prefix="mv_cost_")
 
-                with mv_col2.container(border=True):
+                with mv_col2.container():
                     st.markdown("##### Refresh Count by MV")
                     _render_mv_refresh_count_chart(mv_df, key_prefix="mv_count_")
 
                 # Row 2: Two charts
                 mv_col3, mv_col4 = st.columns(2)
 
-                with mv_col3.container(border=True):
+                with mv_col3.container():
                     st.markdown("##### Average Cost Per Refresh (Credits)")
                     _render_mv_avg_cost_chart(mv_df, key_prefix="mv_avg_")
 
-                with mv_col4.container(border=True):
+                with mv_col4.container():
                     st.markdown("##### Cost vs Refresh Frequency")
                     _render_mv_cost_vs_frequency_chart(mv_df, key_prefix="mv_freq_")
 
@@ -368,9 +379,9 @@ SELECT
 
             # Execute query
             try:
-                perf_df = session.sql(perf_query).to_pandas()
+                perf_df = _cached_sql("tf_perf_insights", perf_query)
             except Exception as e:
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing performance dashboard query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 perf_df = pd.DataFrame()
@@ -391,7 +402,6 @@ SELECT
                 # Display the dataframe
                 st.dataframe(
                     df,
-                    hide_index=True
                 )
 
                 # Charts Section - 2 charts per row
@@ -401,28 +411,28 @@ SELECT
                 # Row 1: Two charts
                 perf_col1, perf_col2 = st.columns(2)
 
-                with perf_col1.container(border=True):
+                with perf_col1.container():
                     st.markdown("##### Metrics by Category")
                     _render_perf_category_chart(perf_df, key_prefix="perf_cat_")
 
-                with perf_col2.container(border=True):
+                with perf_col2.container():
                     st.markdown("##### Metric Values Distribution")
                     _render_perf_values_chart(perf_df, key_prefix="perf_val_")
 
                 # Row 2: Two charts
                 perf_col3, perf_col4 = st.columns(2)
 
-                with perf_col3.container(border=True):
+                with perf_col3.container():
                     st.markdown("##### Category Breakdown")
                     _render_perf_breakdown_chart(perf_df, key_prefix="perf_break_")
 
-                with perf_col4.container(border=True):
+                with perf_col4.container():
                     st.markdown("##### Metrics Summary")
                     _render_perf_summary_chart(perf_df, key_prefix="perf_sum_")
 
     except Exception as e:
         # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -464,7 +474,7 @@ def _render_execution_count_bar_chart(df, key_prefix=""):
             y=plot_df['DISPLAY_PATTERN'],
             x=plot_df['EXECUTION_COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val):,}" for val in plot_df['EXECUTION_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -632,7 +642,7 @@ def _render_avg_duration_bar_chart(df, key_prefix=""):
             y=plot_df['DISPLAY_PATTERN'],
             x=plot_df['AVG_DURATION_MS'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{val:.1f} ms" for val in plot_df['AVG_DURATION_MS']],
             textposition='outside',
             textfont=dict(size=10),
@@ -675,7 +685,7 @@ def _render_avg_duration_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Duration",
             "type": "pie",
@@ -715,7 +725,7 @@ def _render_avg_duration_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Duration",
             "type": "pie",
@@ -755,7 +765,7 @@ def _render_avg_duration_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Duration",
             "type": "pie",
@@ -802,9 +812,9 @@ def _render_recommendation_bar_chart(df, key_prefix=""):
     colors = []
     for rec in rec_counts['RECOMMENDATION']:
         if '⚠️' in rec:
-            colors.append('#d62728')  # Red for warnings
+            colors.append('#E74C3C')  # Red for warnings
         else:
-            colors.append('#2ca02c')  # Green for OK
+            colors.append('#0077B6')  # Green for OK
 
     fig = go.Figure(data=[
         go.Bar(
@@ -840,9 +850,9 @@ def _render_recommendation_pie_chart(df, key_prefix=""):
     colors = []
     for rec in rec_counts.index:
         if '⚠️' in rec:
-            colors.append('#d62728')
+            colors.append('#E74C3C')
         else:
-            colors.append('#2ca02c')
+            colors.append('#0077B6')
 
     option = {
         "legend": {
@@ -887,9 +897,9 @@ def _render_recommendation_donut_chart(df, key_prefix=""):
     colors = []
     for rec in rec_counts.index:
         if '⚠️' in rec:
-            colors.append('#d62728')
+            colors.append('#E74C3C')
         else:
-            colors.append('#2ca02c')
+            colors.append('#0077B6')
 
     option = {
         "legend": {
@@ -934,9 +944,9 @@ def _render_recommendation_rose_chart(df, key_prefix=""):
     colors = []
     for rec in rec_counts.index:
         if '⚠️' in rec:
-            colors.append('#d62728')
+            colors.append('#E74C3C')
         else:
-            colors.append('#2ca02c')
+            colors.append('#0077B6')
 
     option = {
         "legend": {
@@ -1006,7 +1016,7 @@ def _render_count_vs_duration_bar_chart(df, key_prefix=""):
         name='Execution Count',
         x=plot_df['DISPLAY_PATTERN'],
         y=plot_df['EXECUTION_COUNT'],
-        marker_color='#1f77b4',
+        marker_color='#29B5E8',
         text=[f"{int(val):,}" for val in plot_df['EXECUTION_COUNT']],
         textposition='outside',
         textfont=dict(size=9),
@@ -1018,7 +1028,7 @@ def _render_count_vs_duration_bar_chart(df, key_prefix=""):
         name='Avg Duration (ms)',
         x=plot_df['DISPLAY_PATTERN'],
         y=plot_df['AVG_DURATION_MS'],
-        marker_color='#ff7f0e',
+        marker_color='#E8A229',
         text=[f"{val:.0f}" for val in plot_df['AVG_DURATION_MS']],
         textposition='outside',
         textfont=dict(size=9),
@@ -1081,7 +1091,7 @@ def _render_count_vs_duration_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#1f77b4", "#2ca02c", "#d62728", "#ff7f0e", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"],
+        "color": ["#0077B6", "#29B5E8", "#0077B6", "#E74C3C", "#E8A229", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8"],
         "series": [{
             "name": "Total Time",
             "type": "pie",
@@ -1123,7 +1133,7 @@ def _render_count_vs_duration_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#1f77b4", "#2ca02c", "#d62728", "#ff7f0e", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"],
+        "color": ["#0077B6", "#29B5E8", "#0077B6", "#E74C3C", "#E8A229", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8"],
         "series": [{
             "name": "Total Time",
             "type": "pie",
@@ -1165,7 +1175,7 @@ def _render_count_vs_duration_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#1f77b4", "#2ca02c", "#d62728", "#ff7f0e", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"],
+        "color": ["#0077B6", "#29B5E8", "#0077B6", "#E74C3C", "#E8A229", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8"],
         "series": [{
             "name": "Total Time",
             "type": "pie",
@@ -1214,7 +1224,7 @@ def _render_rap_count_bar_chart(df, key_prefix=""):
             y=plot_df['POLICY_NAME'],
             x=plot_df['SLOW_QUERY_COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val):,}" for val in plot_df['SLOW_QUERY_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1377,7 +1387,7 @@ def _render_rap_avg_bar_chart(df, key_prefix=""):
             y=plot_df['PROTECTED_TABLE'],
             x=plot_df['AVG_EXECUTION_MS'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{val:.0f} ms" for val in plot_df['AVG_EXECUTION_MS']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1420,7 +1430,7 @@ def _render_rap_avg_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Avg Execution",
             "type": "pie",
@@ -1460,7 +1470,7 @@ def _render_rap_avg_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Avg Execution",
             "type": "pie",
@@ -1500,7 +1510,7 @@ def _render_rap_avg_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf", "#1f77b4"],
+        "color": ["#E8A229", "#0077B6", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#48CAE4", "#E8A229", "#00B4D8", "#29B5E8"],
         "series": [{
             "name": "Avg Execution",
             "type": "pie",
@@ -1543,7 +1553,7 @@ def _render_rap_table_bar_chart(df, key_prefix=""):
             y=plot_df['PROTECTED_TABLE'],
             x=plot_df['SLOW_QUERY_COUNT'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#0077B6',
             text=[f"{int(val):,}" for val in plot_df['SLOW_QUERY_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1586,7 +1596,7 @@ def _render_rap_table_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Slow Queries",
             "type": "pie",
@@ -1626,7 +1636,7 @@ def _render_rap_table_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Slow Queries",
             "type": "pie",
@@ -1666,7 +1676,7 @@ def _render_rap_table_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#2ca02c", "#98df8a", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#d62728", "#ff9896", "#9467bd", "#c5b0d5"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
         "series": [{
             "name": "Slow Queries",
             "type": "pie",
@@ -1713,7 +1723,7 @@ def _render_rap_total_time_bar_chart(df, key_prefix=""):
             y=agg_df['POLICY_NAME'],
             x=agg_df['TOTAL_TIME_MS'],
             orientation='h',
-            marker_color='#9467bd',
+            marker_color='#0077B6',
             text=[f"{val/1000:.1f}s" for val in agg_df['TOTAL_TIME_MS']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1759,7 +1769,7 @@ def _render_rap_total_time_pie_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c", "#98df8a", "#d62728", "#ff9896"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#0077B6", "#0077B6", "#E74C3C", "#E74C3C"],
         "series": [{
             "name": "Total Time",
             "type": "pie",
@@ -1802,7 +1812,7 @@ def _render_rap_total_time_donut_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c", "#98df8a", "#d62728", "#ff9896"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#0077B6", "#0077B6", "#E74C3C", "#E74C3C"],
         "series": [{
             "name": "Total Time",
             "type": "pie",
@@ -1845,7 +1855,7 @@ def _render_rap_total_time_rose_chart(df, key_prefix=""):
                 "saveAsImage": {"show": True}
             }
         },
-        "color": ["#9467bd", "#c5b0d5", "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c", "#98df8a", "#d62728", "#ff9896"],
+        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#0077B6", "#0077B6", "#E74C3C", "#E74C3C"],
         "series": [{
             "name": "Total Time",
             "type": "pie",
@@ -1892,7 +1902,7 @@ def _render_mv_total_cost_bar_chart(df, key_prefix=""):
             y=plot_df['MV_NAME'],
             x=plot_df['REFRESH_COST_CREDITS'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{val:.4f}" for val in plot_df['REFRESH_COST_CREDITS']],
             textposition='outside',
             textfont=dict(size=10),
@@ -2055,7 +2065,7 @@ def _render_mv_refresh_count_bar_chart(df, key_prefix=""):
             y=plot_df['MV_NAME'],
             x=plot_df['REFRESH_COUNT'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{int(val)}" for val in plot_df['REFRESH_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -2218,7 +2228,7 @@ def _render_mv_avg_cost_bar_chart(df, key_prefix=""):
             y=plot_df['MV_NAME'],
             x=plot_df['AVG_COST_PER_REFRESH'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#0077B6',
             text=[f"{val:.6f}" for val in plot_df['AVG_COST_PER_REFRESH']],
             textposition='outside',
             textfont=dict(size=10),
@@ -2387,7 +2397,7 @@ def _render_mv_cost_vs_frequency_bar_chart(df, key_prefix=""):
         x=(plot_df['REFRESH_COST_CREDITS'] / max_cost * 100),
         orientation='h',
         name='Cost (normalized)',
-        marker_color='#1f77b4',
+        marker_color='#29B5E8',
         hovertemplate='<b>%{y}</b><br>Cost: %{customdata:.4f} credits<extra></extra>',
         customdata=plot_df['REFRESH_COST_CREDITS']
     ))
@@ -2397,7 +2407,7 @@ def _render_mv_cost_vs_frequency_bar_chart(df, key_prefix=""):
         x=(plot_df['REFRESH_COUNT'] / max_count * 100),
         orientation='h',
         name='Frequency (normalized)',
-        marker_color='#ff7f0e',
+        marker_color='#E8A229',
         hovertemplate='<b>%{y}</b><br>Refreshes: %{customdata:,}<extra></extra>',
         customdata=plot_df['REFRESH_COUNT']
     ))
@@ -2565,7 +2575,7 @@ def _render_perf_category_bar_chart(df, key_prefix=""):
             y=cat_counts['METRIC_CATEGORY'],
             x=cat_counts['COUNT'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{int(val)}" for val in cat_counts['COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -2731,7 +2741,7 @@ def _render_perf_values_bar_chart(df, key_prefix=""):
             y=plot_df['METRIC_NAME'],
             x=plot_df['NUMERIC_VALUE'],
             orientation='h',
-            marker_color='#ff7f0e',
+            marker_color='#E8A229',
             text=[f"{val}" for val in plot_df['VALUE']],
             textposition='outside',
             textfont=dict(size=10),
@@ -2911,7 +2921,7 @@ def _render_perf_breakdown_bar_chart(df, key_prefix=""):
             y=cat_agg['METRIC_CATEGORY'],
             x=cat_agg['NUMERIC_VALUE'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#0077B6',
             text=[f"{val:,.2f}" for val in cat_agg['NUMERIC_VALUE']],
             textposition='outside',
             textfont=dict(size=10),
@@ -3095,7 +3105,7 @@ def _render_perf_summary_bar_chart(df, key_prefix=""):
             y=plot_df['LABEL'],
             x=plot_df['NUMERIC_VALUE'],
             orientation='h',
-            marker_color='#9467bd',
+            marker_color='#0077B6',
             text=[f"{val}" for val in plot_df['VALUE']],
             textposition='outside',
             textfont=dict(size=9),

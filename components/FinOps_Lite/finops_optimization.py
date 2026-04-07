@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_finops_optimization(entry_actions=None):
     """
     FinOPS Optimization Component
@@ -30,39 +44,40 @@ def comp_finops_optimization(entry_actions=None):
         st.markdown("### Optimisation")
 
         # Expander 3: Pattern: Copy commands with poor selectivity
-        with st.expander("Pattern: Copy commands with poor selectivity", expanded=False):
+        with st.expander("Pattern: Copy commands with poor selectivity", expanded=True):
             st.markdown("#### Pattern: Copy commands with poor selectivity")
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        'ℹ️&nbsp;&nbsp;Content for Pattern: Copy commands with poor selectivity will be implemented here.'
-                        '</div>', unsafe_allow_html=True)
+            _render_copy_poor_selectivity()
 
         # Expander 4: Pattern: High-frequency DDL operations and cloning
-        with st.expander("Pattern: High-frequency DDL operations and cloning", expanded=False):
+        with st.expander("Pattern: High-frequency DDL operations and cloning", expanded=True):
             _render_ddl_operations()
 
         # Expander 5: Pattern: High-frequency, simple queries
-        with st.expander("Pattern: High-frequency, simple queries", expanded=False):
+        with st.expander("Pattern: High-frequency, simple queries", expanded=True):
             _render_simple_queries()
 
         # Expander 6: Pattern: High-frequency INFORMATION_SCHEMA queries
-        with st.expander("Pattern: High-frequency INFORMATION_SCHEMA queries", expanded=False):
+        with st.expander("Pattern: High-frequency INFORMATION_SCHEMA queries", expanded=True):
             _render_info_schema_queries()
 
         # Expander 7: Pattern: High-frequency SHOW commands (by data applications and third-party tools)
-        with st.expander("Pattern: High-frequency SHOW commands (by data applications and third-party tools)", expanded=False):
+        with st.expander("Pattern: High-frequency SHOW commands (by data applications and third-party tools)", expanded=True):
             _render_show_commands()
 
         # Expander 8: Pattern: Single row inserts and fragmented schemas (by data applications)
-        with st.expander("Pattern: Single row inserts and fragmented schemas (by data applications)", expanded=False):
+        with st.expander("Pattern: Single row inserts and fragmented schemas (by data applications)", expanded=True):
             _render_single_row_inserts()
 
         # Expander 9: Pattern: Complex SQL queries
-        with st.expander("Pattern: Complex SQL queries", expanded=False):
+        with st.expander("Pattern: Complex SQL queries", expanded=True):
             _render_complex_queries()
+
+        with st.expander("Cloud Services Overhead Summary (30 Days)", expanded=True):
+            _render_cloud_services_overhead()
 
     except Exception as e:
         # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -109,7 +124,7 @@ FROM ddl_q
 
 
         # Execute the query
-        ddl_df = st.session_state.session.sql(ddl_query).to_pandas()
+        ddl_df = _cached_sql("fo_ddl", ddl_query)
 
         if not ddl_df.empty:
             # Create Report Category and Metric
@@ -173,11 +188,11 @@ FROM ddl_q
             # Row 1: Total DDL Commands & Distinct Patterns
             ddl_chart_col1, ddl_chart_col2 = st.columns(2)
 
-            with ddl_chart_col1.container(border=True):
+            with ddl_chart_col1.container():
                 st.markdown(f"##### Total DDL Commands: {total_ddl:,}")
                 _render_ddl_total_chart_content(total_ddl, distinct_patterns, key_prefix="ddl_total_")
 
-            with ddl_chart_col2.container(border=True):
+            with ddl_chart_col2.container():
                 st.markdown(f"##### Distinct DDL Patterns: {distinct_patterns:,}")
                 _render_ddl_patterns_chart_content(total_ddl, distinct_patterns, key_prefix="ddl_patterns_")
 
@@ -188,7 +203,7 @@ FROM ddl_q
             _render_clone_summary()
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No DDL operations detected in the last 30 days.'
                         '</div>', unsafe_allow_html=True)
 
@@ -196,7 +211,7 @@ FROM ddl_q
             _render_clone_summary()
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading DDL operations: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -228,7 +243,7 @@ def _render_ddl_total_bar_chart(total_ddl, distinct_patterns, key_prefix=""):
 
     labels = ['Total DDL Commands', 'Distinct Patterns']
     values = [total_ddl, distinct_patterns]
-    colors = ['#1f77b4', '#2ca02c']
+    colors = ['#29B5E8', '#0077B6']
 
     fig_bar = go.Figure(data=[
         go.Bar(
@@ -280,7 +295,7 @@ def _render_ddl_total_standard_pie_chart(total_ddl, distinct_patterns, key_prefi
                 "saveAsImage": {"show": True},
             },
         },
-        "color": ["#1f77b4", "#2ca02c"],
+        "color": ["#29B5E8", "#0077B6"],
         "series": [
             {
                 "name": "DDL Operations",
@@ -323,7 +338,7 @@ def _render_ddl_total_donut_pie_chart(total_ddl, distinct_patterns, key_prefix="
                 "saveAsImage": {"show": True},
             },
         },
-        "color": ["#1f77b4", "#2ca02c"],
+        "color": ["#29B5E8", "#0077B6"],
         "series": [
             {
                 "name": "DDL Operations",
@@ -366,7 +381,7 @@ def _render_ddl_total_rose_pie_chart(total_ddl, distinct_patterns, key_prefix=""
                 "saveAsImage": {"show": True},
             },
         },
-        "color": ["#1f77b4", "#2ca02c"],
+        "color": ["#29B5E8", "#0077B6"],
         "series": [
             {
                 "name": "DDL Operations",
@@ -412,7 +427,7 @@ def _render_ddl_patterns_bar_chart(total_ddl, distinct_patterns, key_prefix=""):
 
     labels = ['Distinct Patterns', 'Avg Executions/Pattern']
     values = [distinct_patterns, avg_per_pattern]
-    colors = ['#2ca02c', '#ff7f0e']
+    colors = ['#0077B6', '#E8A229']
 
     fig_bar = go.Figure(data=[
         go.Bar(
@@ -466,7 +481,7 @@ def _render_ddl_patterns_standard_pie_chart(total_ddl, distinct_patterns, key_pr
                 "saveAsImage": {"show": True},
             },
         },
-        "color": ["#2ca02c", "#ff7f0e"],
+        "color": ["#0077B6", "#E8A229"],
         "series": [
             {
                 "name": "Pattern Analysis",
@@ -511,7 +526,7 @@ def _render_ddl_patterns_donut_pie_chart(total_ddl, distinct_patterns, key_prefi
                 "saveAsImage": {"show": True},
             },
         },
-        "color": ["#2ca02c", "#ff7f0e"],
+        "color": ["#0077B6", "#E8A229"],
         "series": [
             {
                 "name": "Pattern Analysis",
@@ -556,7 +571,7 @@ def _render_ddl_patterns_rose_pie_chart(total_ddl, distinct_patterns, key_prefix
                 "saveAsImage": {"show": True},
             },
         },
-        "color": ["#2ca02c", "#ff7f0e"],
+        "color": ["#0077B6", "#E8A229"],
         "series": [
             {
                 "name": "Pattern Analysis",
@@ -612,7 +627,7 @@ LIMIT 10
 
 
         # Execute the query
-        top_ddl_df = st.session_state.session.sql(top_ddl_query).to_pandas()
+        top_ddl_df = _cached_sql("fo_top_ddl", top_ddl_query)
 
         if not top_ddl_df.empty:
             # Create Report Category and Metric
@@ -672,11 +687,11 @@ LIMIT 10
             # Row 1: Execution Count by Pattern & CS Credits by Pattern
             top_ddl_chart_col1, top_ddl_chart_col2 = st.columns(2)
 
-            with top_ddl_chart_col1.container(border=True):
+            with top_ddl_chart_col1.container():
                 st.markdown("##### Execution Count by Pattern")
                 _render_top_ddl_execution_chart_content(top_ddl_df, key_prefix="top_ddl_exec_")
 
-            with top_ddl_chart_col2.container(border=True):
+            with top_ddl_chart_col2.container():
                 st.markdown("##### Cloud Services Credits by Pattern")
                 _render_top_ddl_credits_chart_content(top_ddl_df, key_prefix="top_ddl_credits_")
 
@@ -686,7 +701,7 @@ LIMIT 10
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading top DDL patterns: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -726,7 +741,7 @@ def _render_top_ddl_execution_bar_chart(df, key_prefix=""):
             go.Bar(
                 x=labels,
                 y=values,
-                marker_color='#1f77b4',
+                marker_color='#29B5E8',
                 text=[f"{v:,}" for v in values],
                 textposition='outside',
                 textfont=dict(size=10),
@@ -927,7 +942,7 @@ def _render_top_ddl_credits_bar_chart(df, key_prefix=""):
             go.Bar(
                 x=labels,
                 y=values,
-                marker_color='#ff7f0e',
+                marker_color='#E8A229',
                 text=[f"{v:.4f}" for v in values],
                 textposition='outside',
                 textfont=dict(size=10),
@@ -1121,7 +1136,7 @@ LIMIT 10
 
 
         # Execute the query
-        cloning_df = st.session_state.session.sql(cloning_query).to_pandas()
+        cloning_df = _cached_sql("fo_cloning", cloning_query)
 
         if not cloning_df.empty:
             # Create Report Category and Metric
@@ -1181,21 +1196,21 @@ LIMIT 10
             # Row 1: Operations by Query Type & Operations by User
             cloning_chart_col1, cloning_chart_col2 = st.columns(2)
 
-            with cloning_chart_col1.container(border=True):
+            with cloning_chart_col1.container():
                 st.markdown("##### Operations by Query Type")
                 _render_cloning_query_type_chart_content(cloning_df, key_prefix="cloning_query_type_")
 
-            with cloning_chart_col2.container(border=True):
+            with cloning_chart_col2.container():
                 st.markdown("##### Operations by User")
                 _render_cloning_user_chart_content(cloning_df, key_prefix="cloning_user_")
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No cloning operations detected in the last 30 days.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading cloning operations: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -1237,7 +1252,7 @@ def _render_cloning_query_type_bar_chart(df, key_prefix=""):
             go.Bar(
                 x=labels,
                 y=values,
-                marker_color='#1f77b4',
+                marker_color='#29B5E8',
                 text=[f"{v:,}" for v in values],
                 textposition='outside',
                 textfont=dict(size=10),
@@ -1444,7 +1459,7 @@ def _render_cloning_user_bar_chart(df, key_prefix=""):
             go.Bar(
                 x=labels,
                 y=values,
-                marker_color='#2ca02c',
+                marker_color='#0077B6',
                 text=[f"{v:,}" for v in values],
                 textposition='outside',
                 textfont=dict(size=10),
@@ -1650,7 +1665,7 @@ FROM clone_q
 
 
         # Execute the query
-        clone_summary_df = st.session_state.session.sql(clone_summary_query).to_pandas()
+        clone_summary_df = _cached_sql("fo_clone_summary", clone_summary_query)
 
         if not clone_summary_df.empty:
             # Create Report Category and Metric
@@ -1678,11 +1693,11 @@ FROM clone_q
 
             clone_summary_chart_col1, clone_summary_chart_col2 = st.columns(2)
 
-            with clone_summary_chart_col1.container(border=True):
+            with clone_summary_chart_col1.container():
                 st.markdown(f"##### Total CLONE Commands: {total_clone:,}")
                 _render_clone_total_chart_content(total_clone, distinct_patterns, key_prefix="clone_total_")
 
-            with clone_summary_chart_col2.container(border=True):
+            with clone_summary_chart_col2.container():
                 st.markdown(f"##### Distinct CLONE Patterns: {distinct_patterns:,}")
                 _render_clone_patterns_summary_chart_content(total_clone, distinct_patterns, key_prefix="clone_patterns_summary_")
 
@@ -1690,12 +1705,12 @@ FROM clone_q
             _render_top_clone_patterns()
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No CLONE operations detected in the last 30 days.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading CLONE summary: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -1727,7 +1742,7 @@ def _render_clone_total_bar_chart(total_clone, distinct_patterns, key_prefix="")
 
     labels = ['Total CLONE Commands', 'Distinct Patterns']
     values = [total_clone, distinct_patterns]
-    colors = ['#9467bd', '#17becf']
+    colors = ['#0077B6', '#00B4D8']
 
     fig_bar = go.Figure(data=[
         go.Bar(
@@ -1764,7 +1779,7 @@ def _render_clone_total_standard_pie_chart(total_clone, distinct_patterns, key_p
         "legend": {"bottom": "5", "left": "center", "orient": "horizontal", "textStyle": {"fontSize": 10}},
         "tooltip": {"trigger": "item", "formatter": "{b}: {c:,}"},
         "toolbox": {"show": True, "feature": {"dataView": {"show": True, "readOnly": False}, "restore": {"show": True}, "saveAsImage": {"show": True}}},
-        "color": ["#9467bd", "#17becf"],
+        "color": ["#0077B6", "#00B4D8"],
         "series": [{"name": "CLONE Operations", "type": "pie", "radius": ["0%", "55%"], "center": ["50%", "40%"], "itemStyle": {"borderRadius": 5}, "data": chart_data}],
     }
 
@@ -1783,7 +1798,7 @@ def _render_clone_total_donut_pie_chart(total_clone, distinct_patterns, key_pref
         "legend": {"bottom": "5", "left": "center", "orient": "horizontal", "textStyle": {"fontSize": 10}},
         "tooltip": {"trigger": "item", "formatter": "{b}: {c:,}"},
         "toolbox": {"show": True, "feature": {"dataView": {"show": True, "readOnly": False}, "restore": {"show": True}, "saveAsImage": {"show": True}}},
-        "color": ["#9467bd", "#17becf"],
+        "color": ["#0077B6", "#00B4D8"],
         "series": [{"name": "CLONE Operations", "type": "pie", "radius": ["30%", "55%"], "center": ["50%", "40%"], "itemStyle": {"borderRadius": 5}, "data": chart_data}],
     }
 
@@ -1802,7 +1817,7 @@ def _render_clone_total_rose_pie_chart(total_clone, distinct_patterns, key_prefi
         "legend": {"bottom": "5", "left": "center", "orient": "horizontal", "textStyle": {"fontSize": 10}},
         "tooltip": {"trigger": "item", "formatter": "{b}: {c:,}"},
         "toolbox": {"show": True, "feature": {"dataView": {"show": True, "readOnly": False}, "restore": {"show": True}, "saveAsImage": {"show": True}}},
-        "color": ["#9467bd", "#17becf"],
+        "color": ["#0077B6", "#00B4D8"],
         "series": [{"name": "CLONE Operations", "type": "pie", "radius": [15, 100], "center": ["50%", "45%"], "roseType": "area", "itemStyle": {"borderRadius": 6}, "data": chart_data}],
     }
 
@@ -1838,7 +1853,7 @@ def _render_clone_patterns_summary_bar_chart(total_clone, distinct_patterns, key
 
     labels = ['Distinct Patterns', 'Avg Executions/Pattern']
     values = [distinct_patterns, avg_per_pattern]
-    colors = ['#17becf', '#bcbd22']
+    colors = ['#00B4D8', '#E8A229']
 
     fig_bar = go.Figure(data=[
         go.Bar(
@@ -1877,7 +1892,7 @@ def _render_clone_patterns_summary_standard_pie_chart(total_clone, distinct_patt
         "legend": {"bottom": "5", "left": "center", "orient": "horizontal", "textStyle": {"fontSize": 10}},
         "tooltip": {"trigger": "item", "formatter": "{b}"},
         "toolbox": {"show": True, "feature": {"dataView": {"show": True, "readOnly": False}, "restore": {"show": True}, "saveAsImage": {"show": True}}},
-        "color": ["#17becf", "#bcbd22"],
+        "color": ["#00B4D8", "#E8A229"],
         "series": [{"name": "Pattern Analysis", "type": "pie", "radius": ["0%", "55%"], "center": ["50%", "40%"], "itemStyle": {"borderRadius": 5}, "data": chart_data}],
     }
 
@@ -1898,7 +1913,7 @@ def _render_clone_patterns_summary_donut_pie_chart(total_clone, distinct_pattern
         "legend": {"bottom": "5", "left": "center", "orient": "horizontal", "textStyle": {"fontSize": 10}},
         "tooltip": {"trigger": "item", "formatter": "{b}"},
         "toolbox": {"show": True, "feature": {"dataView": {"show": True, "readOnly": False}, "restore": {"show": True}, "saveAsImage": {"show": True}}},
-        "color": ["#17becf", "#bcbd22"],
+        "color": ["#00B4D8", "#E8A229"],
         "series": [{"name": "Pattern Analysis", "type": "pie", "radius": ["30%", "55%"], "center": ["50%", "40%"], "itemStyle": {"borderRadius": 5}, "data": chart_data}],
     }
 
@@ -1919,7 +1934,7 @@ def _render_clone_patterns_summary_rose_pie_chart(total_clone, distinct_patterns
         "legend": {"bottom": "5", "left": "center", "orient": "horizontal", "textStyle": {"fontSize": 10}},
         "tooltip": {"trigger": "item", "formatter": "{b}"},
         "toolbox": {"show": True, "feature": {"dataView": {"show": True, "readOnly": False}, "restore": {"show": True}, "saveAsImage": {"show": True}}},
-        "color": ["#17becf", "#bcbd22"],
+        "color": ["#00B4D8", "#E8A229"],
         "series": [{"name": "Pattern Analysis", "type": "pie", "radius": [15, 100], "center": ["50%", "45%"], "roseType": "area", "itemStyle": {"borderRadius": 6}, "data": chart_data}],
     }
 
@@ -1960,7 +1975,7 @@ LIMIT 10
 
 
         # Execute the query
-        top_clone_df = st.session_state.session.sql(top_clone_query).to_pandas()
+        top_clone_df = _cached_sql("fo_top_clone", top_clone_query)
 
         if not top_clone_df.empty:
             # Create Report Category and Metric
@@ -1984,11 +1999,11 @@ LIMIT 10
 
             top_clone_chart_col1, top_clone_chart_col2 = st.columns(2)
 
-            with top_clone_chart_col1.container(border=True):
+            with top_clone_chart_col1.container():
                 st.markdown("##### Execution Count by Pattern")
                 _render_top_clone_execution_chart_content(top_clone_df, key_prefix="top_clone_exec_")
 
-            with top_clone_chart_col2.container(border=True):
+            with top_clone_chart_col2.container():
                 st.markdown("##### Cloud Services Credits by Pattern")
                 _render_top_clone_credits_chart_content(top_clone_df, key_prefix="top_clone_credits_")
 
@@ -1998,7 +2013,7 @@ LIMIT 10
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading top CLONE patterns: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -2034,7 +2049,7 @@ def _render_top_clone_execution_bar_chart(df, key_prefix=""):
         values = chart_df['EXECUTIONS'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#9467bd', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#0077B6', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='Pattern', yaxis_title='Executions', showlegend=False, margin=dict(t=20, b=40, l=50, r=20))
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2112,7 +2127,7 @@ def _render_top_clone_credits_bar_chart(df, key_prefix=""):
         values = chart_df['CS_CREDITS'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#bcbd22', text=[f"{v:.4f}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>CS Credits: %{y:.4f}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#E8A229', text=[f"{v:.4f}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>CS Credits: %{y:.4f}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='Pattern', yaxis_title='Cloud Services Credits', showlegend=False, margin=dict(t=20, b=40, l=50, r=20))
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2195,7 +2210,7 @@ LIMIT 10
 
 
         # Execute the query
-        simple_df = st.session_state.session.sql(simple_queries_query).to_pandas()
+        simple_df = _cached_sql("fo_simple_queries", simple_queries_query)
 
         if not simple_df.empty:
             # Create Report Category and Metric
@@ -2219,21 +2234,21 @@ LIMIT 10
 
             simple_chart_col1, simple_chart_col2 = st.columns(2)
 
-            with simple_chart_col1.container(border=True):
+            with simple_chart_col1.container():
                 st.markdown("##### Execution Count by User")
                 _render_simple_user_chart_content(simple_df, key_prefix="simple_user_")
 
-            with simple_chart_col2.container(border=True):
+            with simple_chart_col2.container():
                 st.markdown("##### Execution Count by Client Tool")
                 _render_simple_client_chart_content(simple_df, key_prefix="simple_client_")
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No high-frequency simple query patterns detected (>1000 executions, <100ms).'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading simple queries: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -2271,7 +2286,7 @@ def _render_simple_user_bar_chart(df, key_prefix=""):
         values = grouped['EXECUTION_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#e377c2', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#75C2D8', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='User', yaxis_title='Execution Count', showlegend=False, margin=dict(t=20, b=80, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2357,7 +2372,7 @@ def _render_simple_client_bar_chart(df, key_prefix=""):
         values = grouped['EXECUTION_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#7f7f7f', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#48CAE4', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='Client Tool', yaxis_title='Execution Count', showlegend=False, margin=dict(t=20, b=80, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2444,7 +2459,7 @@ LIMIT 10
 
 
         # Execute the query
-        info_schema_df = st.session_state.session.sql(info_schema_query).to_pandas()
+        info_schema_df = _cached_sql("fo_info_schema", info_schema_query)
 
         if not info_schema_df.empty:
             # Create Report Category and Metric
@@ -2468,21 +2483,21 @@ LIMIT 10
 
             info_schema_chart_col1, info_schema_chart_col2 = st.columns(2)
 
-            with info_schema_chart_col1.container(border=True):
+            with info_schema_chart_col1.container():
                 st.markdown("##### Execution Count by User")
                 _render_info_schema_user_chart_content(info_schema_df, key_prefix="info_schema_user_")
 
-            with info_schema_chart_col2.container(border=True):
+            with info_schema_chart_col2.container():
                 st.markdown("##### Execution Count by Client Tool")
                 _render_info_schema_client_chart_content(info_schema_df, key_prefix="info_schema_client_")
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No high-frequency INFORMATION_SCHEMA queries detected in the last 30 days.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading INFORMATION_SCHEMA queries: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -2520,7 +2535,7 @@ def _render_info_schema_user_bar_chart(df, key_prefix=""):
         values = grouped['EXECUTION_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#8c564b', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#11567F', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='User', yaxis_title='Execution Count', showlegend=False, margin=dict(t=20, b=80, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2606,7 +2621,7 @@ def _render_info_schema_client_bar_chart(df, key_prefix=""):
         values = grouped['EXECUTION_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#d62728', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#E74C3C', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='Client Tool', yaxis_title='Execution Count', showlegend=False, margin=dict(t=20, b=80, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2692,7 +2707,7 @@ LIMIT 10
 
 
         # Execute the query
-        show_df = st.session_state.session.sql(show_commands_query).to_pandas()
+        show_df = _cached_sql("fo_show_commands", show_commands_query)
 
         if not show_df.empty:
             # Create Report Category and Metric
@@ -2716,21 +2731,21 @@ LIMIT 10
 
             show_chart_col1, show_chart_col2 = st.columns(2)
 
-            with show_chart_col1.container(border=True):
+            with show_chart_col1.container():
                 st.markdown("##### Execution Count by Command Type")
                 _render_show_command_type_chart_content(show_df, key_prefix="show_cmd_type_")
 
-            with show_chart_col2.container(border=True):
+            with show_chart_col2.container():
                 st.markdown("##### Execution Count by User")
                 _render_show_user_chart_content(show_df, key_prefix="show_user_")
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No high-frequency SHOW command patterns detected.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading SHOW commands: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -2768,7 +2783,7 @@ def _render_show_command_type_bar_chart(df, key_prefix=""):
         values = grouped['EXECUTION_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#17becf', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#00B4D8', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='Command Type', yaxis_title='Execution Count', showlegend=False, margin=dict(t=20, b=100, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2854,7 +2869,7 @@ def _render_show_user_bar_chart(df, key_prefix=""):
         values = grouped['EXECUTION_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#9467bd', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#0077B6', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Executions: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='User', yaxis_title='Execution Count', showlegend=False, margin=dict(t=20, b=80, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -2940,7 +2955,7 @@ LIMIT 10
 
 
         # Execute the query
-        inserts_df = st.session_state.session.sql(single_row_inserts_query).to_pandas()
+        inserts_df = _cached_sql("fo_single_row_inserts", single_row_inserts_query)
 
         if not inserts_df.empty:
             # Create Report Category and Metric
@@ -2964,21 +2979,21 @@ LIMIT 10
 
             inserts_chart_col1, inserts_chart_col2 = st.columns(2)
 
-            with inserts_chart_col1.container(border=True):
+            with inserts_chart_col1.container():
                 st.markdown("##### Insert Count by Target Table")
                 _render_inserts_table_chart_content(inserts_df, key_prefix="inserts_table_")
 
-            with inserts_chart_col2.container(border=True):
+            with inserts_chart_col2.container():
                 st.markdown("##### Insert Count by User")
                 _render_inserts_user_chart_content(inserts_df, key_prefix="inserts_user_")
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No single-row INSERT patterns detected.'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading single row inserts: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -3016,7 +3031,7 @@ def _render_inserts_table_bar_chart(df, key_prefix=""):
         values = grouped['INSERT_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#ff7f0e', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Insert Count: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#E8A229', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Insert Count: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='Target Table', yaxis_title='Insert Count', showlegend=False, margin=dict(t=20, b=100, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -3102,7 +3117,7 @@ def _render_inserts_user_bar_chart(df, key_prefix=""):
         values = grouped['INSERT_COUNT'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#2ca02c', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Insert Count: %{y:,}<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#0077B6', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Insert Count: %{y:,}<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='User', yaxis_title='Insert Count', showlegend=False, margin=dict(t=20, b=80, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -3188,7 +3203,7 @@ LIMIT 10
 
 
         # Execute the query
-        complex_df = st.session_state.session.sql(complex_queries_query).to_pandas()
+        complex_df = _cached_sql("fo_complex_queries", complex_queries_query)
 
         if not complex_df.empty:
             # Create Report Category and Metric
@@ -3212,21 +3227,21 @@ LIMIT 10
 
             complex_chart_col1, complex_chart_col2 = st.columns(2)
 
-            with complex_chart_col1.container(border=True):
+            with complex_chart_col1.container():
                 st.markdown("##### Compilation Time by User")
                 _render_complex_user_chart_content(complex_df, key_prefix="complex_user_")
 
-            with complex_chart_col2.container(border=True):
+            with complex_chart_col2.container():
                 st.markdown("##### SQL Character Length by Query")
                 _render_complex_length_chart_content(complex_df, key_prefix="complex_length_")
 
         else:
-            st.markdown('<div style="background-color: #d4edda; border-left: 6px solid #28a745; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '✅&nbsp;&nbsp;No complex query patterns detected (compilation time >5 seconds).'
                         '</div>', unsafe_allow_html=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error loading complex queries: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -3264,7 +3279,7 @@ def _render_complex_user_bar_chart(df, key_prefix=""):
         values = grouped['COMPILE_MS'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#d62728', text=[f"{v:,.0f}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Compile Time: %{y:,.0f} ms<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#E74C3C', text=[f"{v:,.0f}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>Compile Time: %{y:,.0f} ms<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='User', yaxis_title='Compilation Time (ms)', showlegend=False, margin=dict(t=20, b=80, l=50, r=20), xaxis_tickangle=-45)
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -3349,7 +3364,7 @@ def _render_complex_length_bar_chart(df, key_prefix=""):
         values = chart_df['SQL_CHARACTER_LENGTH'].tolist()
 
         fig_bar = go.Figure(data=[
-            go.Bar(x=labels, y=values, marker_color='#1f77b4', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>SQL Length: %{y:,} chars<extra></extra>')
+            go.Bar(x=labels, y=values, marker_color='#29B5E8', text=[f"{v:,}" for v in values], textposition='outside', textfont=dict(size=10), hovertemplate='<b>%{x}</b><br>SQL Length: %{y:,} chars<extra></extra>')
         ])
         fig_bar.update_layout(height=350, xaxis_title='Query', yaxis_title='SQL Character Length', showlegend=False, margin=dict(t=20, b=40, l=50, r=20))
         st.plotly_chart(fig_bar, use_container_width=True, key=f"{key_prefix}bar_plotly")
@@ -3394,3 +3409,168 @@ def _render_complex_length_rose_pie_chart(df, key_prefix=""):
         st_echarts(options=option, height="350px", key=f"{key_prefix}rose_chart")
     else:
         st.info("No SQL length data available for chart.")
+
+
+def _render_copy_poor_selectivity():
+    import plotly.graph_objects as go
+    import pandas as pd
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>COPY Commands with Poor Selectivity:</b> COPY commands that have high execution '
+        'time (>1 second) but load fewer than 100 rows. This pattern indicates excessive file listing '
+        'overhead — the query is scanning many files but extracting very little data.</div>',
+        unsafe_allow_html=True)
+    try:
+        session = st.session_state.session
+        summary_query = """
+        WITH copy_q AS (
+            SELECT
+                QUERY_PARAMETERIZED_HASH,
+                MIN(QUERY_TEXT) AS sample_text,
+                COUNT(*) AS executions,
+                SUM(CREDITS_USED_CLOUD_SERVICES) AS cs_credits
+            FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+            WHERE START_TIME > DATEADD('day', -30, CURRENT_TIMESTAMP())
+              AND REGEXP_LIKE(QUERY_TEXT, '^\\s*COPY\\s+INTO\\b', 'i')
+            GROUP BY QUERY_PARAMETERIZED_HASH
+        )
+        SELECT
+            SUM(executions) AS total_copy_commands_30d,
+            COUNT(*) AS distinct_copy_patterns,
+            ROUND(SUM(cs_credits), 4) AS total_cloud_services_credits
+        FROM copy_q
+        """
+        patterns_query = """
+        SELECT
+            SUBSTR(QUERY_TEXT, 1, 120) AS query_pattern,
+            COUNT(*) AS execution_count,
+            SUM(ROWS_PRODUCED) AS total_rows_loaded,
+            ROUND(AVG(COMPILATION_TIME), 0) AS avg_compile_ms,
+            ROUND(AVG(EXECUTION_TIME), 0) AS avg_execution_ms,
+            ROUND(SUM(CREDITS_USED_CLOUD_SERVICES), 4) AS cloud_services_credits,
+            CASE
+                WHEN AVG(COMPILATION_TIME) > 5000 THEN 'HIGH_FILE_LISTING_OVERHEAD'
+                WHEN COUNT(*) > 100 AND SUM(ROWS_PRODUCED) < 1000 THEN 'REDUNDANT_PATTERN'
+                ELSE 'INVESTIGATE'
+            END AS issue_type
+        FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+        WHERE START_TIME >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+          AND QUERY_TYPE = 'COPY'
+          AND EXECUTION_TIME > 1000
+          AND ROWS_PRODUCED < 100
+        GROUP BY SUBSTR(QUERY_TEXT, 1, 120)
+        ORDER BY execution_count DESC
+        LIMIT 10
+        """
+        df_summary = _cached_sql("fo_summary", summary_query)
+        df_patterns = _cached_sql("fo_patterns", patterns_query)
+        col1, col2, col3 = st.columns(3)
+        if not df_summary.empty:
+            total_copy = df_summary['TOTAL_COPY_COMMANDS_30D'].iloc[0] if not df_summary.empty else 0
+            distinct = df_summary['DISTINCT_COPY_PATTERNS'].iloc[0] if not df_summary.empty else 0
+            cs_credits = df_summary['TOTAL_CLOUD_SERVICES_CREDITS'].iloc[0] if not df_summary.empty else 0
+            with col1:
+                st.metric("Total COPY Commands (30d)", f"{int(total_copy):,}" if total_copy else "0")
+            with col2:
+                st.metric("Distinct Patterns", f"{int(distinct):,}" if distinct else "0")
+            with col3:
+                st.metric("Cloud Services Credits", f"{float(cs_credits):.4f}" if cs_credits else "0.0000")
+        if df_patterns.empty:
+            st.success("No COPY commands with poor selectivity detected in the last 30 days.")
+            return
+        df_patterns['EXECUTION_COUNT'] = pd.to_numeric(df_patterns['EXECUTION_COUNT'], errors='coerce').fillna(0)
+        df_patterns['CLOUD_SERVICES_CREDITS'] = pd.to_numeric(df_patterns['CLOUD_SERVICES_CREDITS'], errors='coerce').fillna(0)
+        _issue_colors = {'HIGH_FILE_LISTING_OVERHEAD': '#E74C3C', 'REDUNDANT_PATTERN': '#E8A229', 'INVESTIGATE': '#75C2D8'}
+        bar_colors = [_issue_colors.get(t, '#29B5E8') for t in df_patterns['ISSUE_TYPE']]
+        short_labels = [p[:40] + '...' if len(p) > 40 else p for p in df_patterns['QUERY_PATTERN']]
+        fig = go.Figure(go.Bar(
+            y=short_labels, x=df_patterns['EXECUTION_COUNT'],
+            orientation='h',
+            marker_color=bar_colors,
+            text=df_patterns['EXECUTION_COUNT'], textposition='outside',
+            hovertemplate='%{y}<br>Executions: %{x}<extra></extra>'
+        ))
+        fig.update_layout(
+            title='COPY Patterns with Poor Selectivity (Last 30 Days)',
+            xaxis_title='Execution Count', yaxis_title='Query Pattern',
+            height=max(300, len(df_patterns) * 45 + 80),
+            margin=dict(t=50, l=280, r=20, b=60)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("**Inefficient COPY Command Detail**")
+        st.dataframe(df_patterns[['QUERY_PATTERN', 'EXECUTION_COUNT', 'TOTAL_ROWS_LOADED', 'AVG_COMPILE_MS', 'AVG_EXECUTION_MS', 'CLOUD_SERVICES_CREDITS', 'ISSUE_TYPE']])
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+
+
+def _render_cloud_services_overhead():
+    st.markdown(
+        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
+        'ℹ️&nbsp;&nbsp;<b>Cloud Services Overhead:</b> Aggregated cloud services credits consumed by anti-pattern '
+        'query types (SHOW commands, short queries, metadata scans, single-row inserts) over the last 30 days.</div>',
+        unsafe_allow_html=True)
+    try:
+        query = """
+        WITH pattern_summary AS (
+            SELECT 'SHOW Commands' AS pattern, SUM(credits_used_cloud_services) AS credits
+            FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+            WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+              AND query_type = 'SHOW'
+            UNION ALL
+            SELECT 'Short Queries (<100ms)', SUM(credits_used_cloud_services)
+            FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+            WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+              AND total_elapsed_time < 100
+            UNION ALL
+            SELECT 'Metadata Scans', SUM(credits_used_cloud_services)
+            FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+            WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+              AND (schema_name = 'INFORMATION_SCHEMA' OR query_text ILIKE '%INFORMATION_SCHEMA%')
+            UNION ALL
+            SELECT 'Single-Row Inserts', SUM(credits_used_cloud_services)
+            FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+            WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+              AND query_type = 'INSERT' AND rows_produced = 1
+        )
+        SELECT
+            pattern,
+            ROUND(credits, 4) AS cloud_services_credits_30d,
+            ROUND(credits * 3.00, 2) AS estimated_cost_usd,
+            ROUND(RATIO_TO_REPORT(credits) OVER () * 100, 1) AS pct_of_overhead
+        FROM pattern_summary
+        WHERE credits > 0
+        ORDER BY credits DESC
+        """
+        df = _cached_sql("fo_cloud_svcs_overhead", query)
+        if df.empty:
+            st.success("No significant cloud services overhead detected from anti-pattern queries.")
+            return
+        for c in ['CLOUD_SERVICES_CREDITS_30D', 'ESTIMATED_COST_USD', 'PCT_OF_OVERHEAD']:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Overhead Credits", f"{df['CLOUD_SERVICES_CREDITS_30D'].sum():,.4f}")
+        with col2:
+            st.metric("Estimated Cost", f"${df['ESTIMATED_COST_USD'].sum():,.2f}")
+        colors = ['#29B5E8', '#11567F', '#75C2D8', '#E8A229']
+        fig = go.Figure(go.Bar(
+            x=df['PATTERN'], y=df['CLOUD_SERVICES_CREDITS_30D'],
+            marker_color=colors[:len(df)],
+            text=[f"{v:,.4f}" for v in df['CLOUD_SERVICES_CREDITS_30D']], textposition='outside'
+        ))
+        fig.update_layout(
+            title='Cloud Services Overhead by Anti-Pattern (Last 30 Days)',
+            yaxis_title='Credits',
+            height=380, margin=dict(t=50, b=80)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        fig2 = go.Figure(go.Pie(
+            labels=df['PATTERN'], values=df['PCT_OF_OVERHEAD'],
+            hole=0.3,
+            marker=dict(colors=colors[:len(df)])
+        ))
+        fig2.update_layout(title='Overhead Distribution', height=350, margin=dict(t=50, b=20))
+        st.plotly_chart(fig2, use_container_width=True)
+        st.dataframe(df)
+    except Exception as e:
+        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)

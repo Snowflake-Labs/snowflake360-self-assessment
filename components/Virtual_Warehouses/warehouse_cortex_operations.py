@@ -8,6 +8,20 @@ import time
 from typing import Dict, Any, Optional, List
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def call_cortex_llm(session, model_name: str, prompt: str, operation_name: str = "cortex_analysis") -> str:
     """
     Call Snowflake Cortex LLM with the provided prompt.
@@ -41,23 +55,23 @@ def call_cortex_llm(session, model_name: str, prompt: str, operation_name: str =
 
     except Exception as e:
         error_msg = str(e)
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error in Cortex {operation_name} with {model_name}: {error_msg}'
                     f'</div>', unsafe_allow_html=True)
 
         if "unavailable" in error_msg.lower() or "not found" in error_msg.lower():
-            st.markdown('<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '🛑&nbsp;&nbsp;<strong>Model Unavailable</strong>: The selected Cortex model is not available in your environment.'
                         '</div>', unsafe_allow_html=True)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;<strong>Available models to try:</strong>'
                         '</div>', unsafe_allow_html=True)
             from .config import AVAILABLE_CORTEX_MODELS
             for model in AVAILABLE_CORTEX_MODELS:
-                st.markdown(f'<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         f'ℹ️&nbsp;&nbsp;• {model}'
                         f'</div>', unsafe_allow_html=True)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;Please select a different model from the dropdown and try again.'
                         '</div>', unsafe_allow_html=True)
 
@@ -97,7 +111,7 @@ def fetch_warehouse_data_for_analysis(session, lookback_days: int = 15,
         LIMIT {top_n_warehouses}
         """
 
-        top_warehouses_df = session.sql(top_wh_query).to_pandas()
+        top_warehouses_df = _cached_sql("wc_top_warehouses", top_wh_query)
         if top_warehouses_df.empty:
             st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                                 '⚠️&nbsp;&nbsp;No warehouses found with credit usage in the specified period.'
@@ -277,10 +291,10 @@ def fetch_warehouse_data_for_analysis(session, lookback_days: int = 15,
         ORDER BY SUM(jhd.total_credits_used) DESC
         """
 
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;Fetching warehouse time series data...'
                     '</div>', unsafe_allow_html=True)
-        result = session.sql(query).to_pandas()
+        result = _cached_sql("wc_timeseries", query)
 
         if result.empty:
             st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
@@ -292,36 +306,36 @@ def fetch_warehouse_data_for_analysis(session, lookback_days: int = 15,
         return result
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error fetching warehouse data for analysis: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
-        st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     'ℹ️&nbsp;&nbsp;Please check Snowflake permissions and ensure access to SNOWFLAKE.ACCOUNT_USAGE tables.'
                     '</div>', unsafe_allow_html=True)
 
         error_msg = str(e)
         if "not exist or not authorized" in error_msg:
-            st.markdown('<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '🛑&nbsp;&nbsp;<strong>Access Issue</strong>: The ACCOUNT_USAGE tables are not accessible.'
                         '</div>', unsafe_allow_html=True)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;<strong>Possible Solutions:</strong>'
                         '</div>', unsafe_allow_html=True)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;• Verify you have SELECT permissions on SNOWFLAKE.ACCOUNT_USAGE.* tables'
                         '</div>', unsafe_allow_html=True)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;• Check if the tables exist in the specified schema'
                         '</div>', unsafe_allow_html=True)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;• Ensure your role has access to the SNOWFLAKE database'
                         '</div>', unsafe_allow_html=True)
 
         if 'account_info' not in st.session_state:
-            st.markdown('<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         '🛑&nbsp;&nbsp;<strong>Session Context Issue</strong>: Account information not initialized.'
                         '</div>', unsafe_allow_html=True)
-            st.markdown('<div style="background-color: #e7f3fe; border-left: 6px solid #2196F3; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+            st.markdown('<div style="background-color: #f0f7fb; border-left: 6px solid #29B5E8; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                         'ℹ️&nbsp;&nbsp;Please ensure the application session context is properly set up.'
                         '</div>', unsafe_allow_html=True)
 
@@ -419,7 +433,7 @@ def run_warehouse_analysis(session, model_name: str, warehouses_df: pd.DataFrame
     except Exception as e:
         progress_bar.empty()
         status_text.empty()
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Error during warehouse analysis: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
         return results

@@ -9,6 +9,20 @@ except ImportError:
         st.info("Chart unavailable (echarts not supported in SiS)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 
 
 def comp_git_integration(entry_actions=None):
@@ -46,20 +60,13 @@ def comp_git_integration(entry_actions=None):
             GROUP BY ALL
             """
 
-            # Display the query in terminal
-            print("=" * 100)
-            print("🔧 GIT INTEGRATION ACTIVITY ANALYSIS QUERY")
-            print("=" * 100)
-            print(f"🏢 ACCOUNT_ID: {account_id}")
-            print("=" * 100)
-            print(git_query)
-            print("=" * 100)
+
 
             try:
-                df = st.session_state.session.sql(git_query).to_pandas()
+                df = _cached_sql("rd_git_integration", git_query)
             except Exception as e:
                 # st.error(f"Error executing query: {str(e)}")
-                st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                             f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
                             f'</div>', unsafe_allow_html=True)
                 return
@@ -82,7 +89,7 @@ def comp_git_integration(entry_actions=None):
 
     except Exception as e:
         # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #f8d7da; border-left: 6px solid #dc3545; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
 
@@ -165,11 +172,11 @@ def _render_git_charts(df):
 
     col1, col2 = st.columns(2)
 
-    with col1.container(border=True):
+    with col1.container():
         st.markdown("##### Operation Count by Type")
         _render_operation_count_chart(df, key_prefix="op_count_")
 
-    with col2.container(border=True):
+    with col2.container():
         st.markdown("##### Git Operations Distribution")
         _render_operations_distribution_chart(df, key_prefix="op_dist_")
 
@@ -207,7 +214,7 @@ def _render_operation_count_bar_chart(df, key_prefix=""):
             y=plot_df['OPERATION_TYPE'],
             x=plot_df['COUNT_OPS'],
             orientation='h',
-            marker_color='#1f77b4',
+            marker_color='#29B5E8',
             text=[f"{val:,}" for val in plot_df['COUNT_OPS']],
             textposition='outside',
             textfont=dict(size=10),
@@ -377,7 +384,7 @@ def _render_distribution_bar_chart(df, key_prefix=""):
             y=plot_df['OPERATION_TYPE'],
             x=plot_df['PERCENTAGE'],
             orientation='h',
-            marker_color='#2ca02c',
+            marker_color='#0077B6',
             text=[f"{val:.1f}%" for val in plot_df['PERCENTAGE']],
             textposition='outside',
             textfont=dict(size=10),

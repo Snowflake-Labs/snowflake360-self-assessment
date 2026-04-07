@@ -21,13 +21,7 @@ SPACE_BUTTON_MARKDOWN: str = '''
     <div class="custom-container" style="margin-bottom:28px;"> </div>
 '''
 
-GREEN = '#70A572' #'rgba(112,165,114,1.0)'
-GREEN_YELLOW = '#B3BB5F' # 'rgba(179,187,95,1.0)'
-YELLOW = '#F5C242' # 'rgba(245,194,66,1.0)'
-YELLOW_RED = '#E69150' # 'rgba(230,145,80,1.0)'
-RED_YELLOW = '#CC4043' # 'rgba(204,67,67,1.0)'
-RED = '#CC4343' # 'rgba(204,67,67,1.0)'
-GREY = '#BAC4CF' # 'rgba(186,196,207,1.0)'
+
 
 TOOL_TIP:str =              """
                 <style>
@@ -49,14 +43,14 @@ TOOL_TIP:str =              """
                   margin-left: -5px; /* Adjust the width of the triangle */
                   border-width: 5px;
                   border-style: solid;
-                  border-color: #D3D3D3 transparent transparent transparent; /* Same color as tooltip */
+                  border-color: #e0e0e0 transparent transparent transparent;
                 }
                 /* Tooltip text */
                 .tooltip .tooltiptext {
                         visibility: hidden;
                         min-width: 210px;
-                        color: #525252;
-                        background-color: #e2e2e2;
+                        color: #666666;
+                        background-color: #F0F2F6;
                         text-align: center;
                         padding: 1px;
                         border-radius: 6px;
@@ -66,7 +60,7 @@ TOOL_TIP:str =              """
                         left: -97px;
                         opacity: 0.7;
                         font-size: 12px;
-                        border: 0.2px solid gray;
+                        border: 0.2px solid #e0e0e0;
                 }
 
                 /* Show the tooltip text on hover */

@@ -150,7 +150,7 @@ def render_report_download(output_text, file_prefix, label, dl_key):
     except Exception as e:
         pdf_link = (
             f'<span class="dl-btn dl-pdf" '
-            f'style="background:#dc3545 !important;cursor:default;">'
+            f'style="background:#E74C3C !important;cursor:default;">'
             f'PDF unavailable: {str(e)}</span>'
         )
 
@@ -163,7 +163,7 @@ def render_report_download(output_text, file_prefix, label, dl_key):
     html = f'''
     <style>
         .rpt-{uid} {{
-            background: linear-gradient(135deg, #c5deb5 0%, #d6eac8 100%);
+            background: linear-gradient(135deg, #f0f7fb 0%, #f0f7fb 100%);
             border-radius: 8px;
             padding: 14px 28px;
             margin-top: 10px;
@@ -171,7 +171,7 @@ def render_report_download(output_text, file_prefix, label, dl_key):
             display: flex;
             align-items: flex-end;
             gap: 18px;
-            border: 1px solid #b8d4a5;
+            border: 1px solid #75C2D8;
         }}
         .rpt-{uid} .field-group {{
             display: flex;
@@ -181,12 +181,12 @@ def render_report_download(output_text, file_prefix, label, dl_key):
         .rpt-{uid} .field-label {{
             font-size: 12px;
             font-weight: 600;
-            color: #3a5a2a;
+            color: #003D73;
             margin-bottom: 5px;
         }}
         .rpt-{uid} select {{
             background-color: #fff;
-            border: 1px solid #9abf8a;
+            border: 1px solid #75C2D8;
             border-radius: 4px;
             padding: 7px 30px 7px 10px;
             font-size: 14px;
@@ -196,12 +196,12 @@ def render_report_download(output_text, file_prefix, label, dl_key):
             outline: none;
         }}
         .rpt-{uid} select:focus {{
-            border-color: #6da34d;
-            box-shadow: 0 0 0 2px rgba(109, 163, 77, 0.2);
+            border-color: #29B5E8;
+            box-shadow: 0 0 0 2px rgba(41, 181, 232, 0.2);
         }}
         .rpt-{uid} .dl-btn {{
             display: none;
-            background: linear-gradient(180deg, #8fbf6a 0%, #6da34d 100%);
+            background: linear-gradient(180deg, #29B5E8 0%, #11567F 100%);
             color: white !important;
             border: none;
             border-radius: 6px;
@@ -217,8 +217,8 @@ def render_report_download(output_text, file_prefix, label, dl_key):
             top: -2px;
         }}
         .rpt-{uid} .dl-btn:hover {{
-            background: linear-gradient(180deg, #7db35a 0%, #5c8f3f 100%);
-            box-shadow: 0 2px 8px rgba(90, 140, 60, 0.35);
+            background: linear-gradient(180deg, #1A7DA8 0%, #003D73 100%);
+            box-shadow: 0 2px 8px rgba(0, 61, 115, 0.35);
         }}
         .rpt-{uid} .dl-btn:active {{
             transform: scale(0.98);

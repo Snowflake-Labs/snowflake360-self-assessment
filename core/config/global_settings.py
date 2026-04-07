@@ -76,7 +76,7 @@ DEFAULT2_MARKDOWN_BODY: str = '''
     /* Global Typography Styles */
     .app_title, h1.app_title {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #1E3F66 !important;
+        color: #003D73 !important;
         font-size: 48px !important;
         font-weight: bold !important;
         margin: 0 !important;
@@ -87,49 +87,49 @@ DEFAULT2_MARKDOWN_BODY: str = '''
     /* Target Streamlit's markdown elements */
     .stMarkdown h1.app_title {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #1E3F66 !important;
+        color: #003D73 !important;
         font-size: 48px !important;
         font-weight: bold !important;
     }
 
     .header01 {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #1E3F66 !important;
+        color: #003D73 !important;
         font-size: 36px !important;
         font-weight: normal !important;
     }
 
     .header02 {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #2E5984 !important;
+        color: #11567F !important;
         font-size: 32px !important;
         font-weight: normal !important;
     }
 
     .header03 {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #528AAE !important;
+        color: #29B5E8 !important;
         font-size: 28px !important;
         font-weight: normal !important;
     }
 
     .header04 {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #73A5C6 !important;
+        color: #75C2D8 !important;
         font-size: 24px !important;
         font-weight: normal !important;
     }
 
     .body_text {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #000000 !important;
+        color: #262730 !important;
         font-size: 20px !important;
         font-weight: normal !important;
     }
 
     .code_text {
         font-family: 'Source Code Pro', monospace !important;
-        color: #000000 !important;
+        color: #262730 !important;
         font-size: 12px !important;
         font-weight: normal !important;
     }
@@ -141,7 +141,7 @@ DEFAULT2_MARKDOWN_BODY: str = '''
     .stMarkdown h1:not(.app_title),
     h1:not(.app_title) {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #1E3F66 !important;
+        color: #003D73 !important;
         font-size: 48px !important;
         font-weight: bold !important;
         margin: 0 !important;
@@ -154,7 +154,7 @@ DEFAULT2_MARKDOWN_BODY: str = '''
     .stMarkdown h2,
     h2 {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #1E3F66 !important;
+        color: #003D73 !important;
         font-size: 36px !important;
         font-weight: normal !important;
         margin: 0 !important;
@@ -167,7 +167,7 @@ DEFAULT2_MARKDOWN_BODY: str = '''
     .stMarkdown h3,
     h3 {
         font-family: 'Source Sans Pro', sans-serif !important;
-        color: #2E5984 !important;
+        color: #11567F !important;
         font-size: 32px !important;
         font-weight: normal !important;
         margin: 0 !important;
@@ -225,20 +225,20 @@ DEFAULT2_MARKDOWN_BODY: str = '''
     [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
     [data-testid="stNumberInput"] input {
         # background-color: #EFEFEF !important;
-        background-color: #F1F2F3 !important;
+        background-color: #F0F2F6 !important;
     }
 
     /* Section headers with underline */
     .section-header {
         font-family: 'Source Sans Pro', sans-serif !important;
-        # color: #1E3F66 !important;
-        color: #1B609D !important;
+        # color: #003D73 !important;
+        color: #0055A5 !important;
         font-size: 28px !important;
         font-weight: 600 !important;
         padding-bottom: 2px !important;
         line-height: 1.0 !important;
-        # border-bottom: 2px solid #1E3F66 !important;
-        border-bottom: 2px solid #1B609D !important;
+        # border-bottom: 2px solid #003D73 !important;
+        border-bottom: 2px solid #0055A5 !important;
         margin-bottom: 20px !important;
         margin-top: 10px !important;
     }
@@ -279,7 +279,7 @@ APP_VERSION_FOOTER = f"""
         left: 0;
         bottom: 0;
         width: 100%;
-        color: gray;
+        color: #666666;
         text-align: right;
         padding: 2px 10px 2px;
     }}
