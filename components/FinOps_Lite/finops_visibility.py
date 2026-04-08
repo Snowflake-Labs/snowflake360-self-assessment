@@ -58,6 +58,8 @@ def comp_finops_visibility(entry_actions=None):
         with st.expander("Service Type Cost Breakdown", expanded=True):
             _render_service_type_breakdown(cp)
         _render_wh_eac_heatmap(cp)
+        with st.expander("Account-Level Cost Anomalies (Last 60 Days)", expanded=True):
+            _render_cost_anomalies(cp)
     except Exception as e:
         st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
                     f'Component Error: {str(e)}'
@@ -437,3 +439,54 @@ def _render_wh_eac_heatmap(cp):
 
     styled = display_df.style.applymap(_color_cell, subset=num_cols)
     st.dataframe(styled, use_container_width=True)
+
+
+def _render_cost_anomalies(cp):
+    df = st.session_state.get("fv_cost_anomalies", pd.DataFrame())
+    if df.empty:
+        st.info("No cost anomalies detected in the last 60 days.")
+        return
+
+    severity_colors = {"CRITICAL": "#E74C3C", "HIGH": _CA, "MODERATE": _C1, "LOW": _C3}
+
+    chart_df = df.sort_values("ANOMALY_DATE", ascending=True).copy()
+    dates = [str(d)[:10] for d in chart_df["ANOMALY_DATE"].tolist()]
+    colors = [severity_colors.get(s, _C1) for s in chart_df["SEVERITY"].tolist()]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=dates,
+        y=chart_df["ACTUAL_COST_USD"].tolist(),
+        name="Actual Cost ($)",
+        marker_color=colors,
+        text=[f"${v:,.0f}" for v in chart_df["ACTUAL_COST_USD"].tolist()],
+        textposition="outside",
+    ))
+    fig.add_trace(go.Scatter(
+        x=dates,
+        y=chart_df["EXPECTED_COST_USD"].tolist(),
+        name="Expected Cost ($)",
+        mode="lines+markers",
+        line=dict(color=_C2, width=2, dash="dash"),
+        marker=dict(size=6),
+    ))
+    fig.update_layout(
+        height=400,
+        margin=dict(t=30, b=80, l=50, r=10),
+        xaxis=dict(tickangle=45, title="Anomaly Date"),
+        yaxis_title="Cost (USD)",
+        legend=dict(orientation="h", y=1.05, x=0, xanchor="left"),
+        barmode="overlay",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown(
+        "**Severity Legend:** "
+        '<span style="color:#E74C3C">&#9608; CRITICAL (>100%)</span> · '
+        f'<span style="color:{_CA}">&#9608; HIGH (>50%)</span> · '
+        f'<span style="color:{_C1}">&#9608; MODERATE (>25%)</span> · '
+        f'<span style="color:{_C3}">&#9608; LOW (≤25%)</span>',
+        unsafe_allow_html=True,
+    )
+
+    st.dataframe(df, use_container_width=True)

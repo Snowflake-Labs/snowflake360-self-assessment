@@ -709,4 +709,26 @@ SELECT
 FROM clone_q
 """,
 
+    "fv_cost_anomalies": """
+SELECT
+    ad.date AS ANOMALY_DATE,
+    ad.anomaly_id AS ANOMALY_ID,
+    ROUND(ad.actual_value, 2) AS ACTUAL_CREDITS,
+    ROUND(ad.forecasted_value, 2) AS EXPECTED_CREDITS,
+    ROUND(ad.actual_value * {credit_price}, 2) AS ACTUAL_COST_USD,
+    ROUND(ad.forecasted_value * {credit_price}, 2) AS EXPECTED_COST_USD,
+    ROUND((ad.actual_value - ad.forecasted_value) * {credit_price}, 2) AS ESTIMATED_OVERSPEND_USD,
+    ROUND(((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100, 1) AS DEVIATION_PCT,
+    CASE
+        WHEN ((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100 > 100 THEN 'CRITICAL'
+        WHEN ((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100 > 50 THEN 'HIGH'
+        WHEN ((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100 > 25 THEN 'MODERATE'
+        ELSE 'LOW'
+    END AS SEVERITY
+FROM snowflake.account_usage.anomalies_daily ad
+WHERE ad.date >= DATEADD('day', -60, CURRENT_TIMESTAMP())
+    AND ad.is_anomaly = TRUE
+ORDER BY ad.date DESC
+""",
+
 }
