@@ -14,6 +14,7 @@ from core.config.design_tokens import (
     CSS_CUSTOM_PROPERTIES,
 )
 from core.export_collectors import TOPIC_EXPORTERS
+from components.Database_Management.db_overview import _query_cache as _db_cache
 
 global_settings = cr.config
 
@@ -166,6 +167,22 @@ def _nav_key(label):
     for ch in ' ()&-/':
         safe = safe.replace(ch, '_')
     return f"nav_{safe}"
+
+
+_EXPORT_SENTINELS = {
+    "Database Management":    lambda: bool(_db_cache),
+    "Virtual Warehouses":     lambda: "wh_fleet_data" in st.session_state,
+    "Access Control":         lambda: "auth_role_hygiene" in st.session_state,
+    "Data Ingestion":         lambda: "ingestion_streaming_data" in st.session_state,
+    "Data Transformation":    lambda: "tf_overview" in st.session_state,
+    "FinOps (lite)":          lambda: "finops_exec_forecast" in st.session_state,
+    "Data Recovery & DevOps": lambda: "devops_git_count" in st.session_state,
+    "Data Governance":        lambda: "dg_health_score_data" in st.session_state,
+}
+
+def _export_ready(topic: str) -> bool:
+    checker = _EXPORT_SENTINELS.get(topic)
+    return bool(checker()) if checker else False
 
 if 'selected_menu' not in st.session_state:
     st.session_state.selected_menu = "Home" if "Home" in menu_options else (menu_options[0] if menu_options else None)
@@ -327,38 +344,21 @@ else:
             unsafe_allow_html=True
         )
     with _hdr_right:
-        if selected_menu in TOPIC_EXPORTERS:
+        if selected_menu in TOPIC_EXPORTERS and _export_ready(selected_menu):
             st.markdown('<span class="telemetry-btn-anchor"></span>', unsafe_allow_html=True)
-            _export_key = f"export_{_nav_key(selected_menu)}"
-            if st.button("Export Telemetry for Printing", key=_export_key, type="secondary"):
-                st.session_state[f"_run_export_{selected_menu}"] = True
-
-    if st.session_state.get(f"_run_export_{selected_menu}"):
-        st.session_state[f"_run_export_{selected_menu}"] = False
-        _exp_progress = st.progress(0, text="Generating export...")
-        try:
-            _exp_progress.progress(20, text="Collecting cached data...")
-            _account = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
-            _exp_progress.progress(50, text="Building HTML report...")
-            _html_content = TOPIC_EXPORTERS[selected_menu](_account)
-            _exp_progress.progress(90, text="Preparing download...")
             _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
             _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            _exp_progress.progress(100, text="Ready!")
-            import base64
-            _b64 = base64.b64encode(_html_content.encode()).decode()
-            components.html(f"""
-            <script>
-            var a = document.createElement('a');
-            a.href = 'data:text/html;base64,{_b64}';
-            a.download = '{_fname}';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            </script>
-            """, height=0)
-        except Exception as _exp_err:
-            st.error(f"Export failed: {_exp_err}")
+            def _gen_export(menu=selected_menu, fname=_fname):
+                _acct = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
+                return TOPIC_EXPORTERS[menu](_acct).encode()
+            st.download_button(
+                label="Export Telemetry for Printing",
+                data=_gen_export,
+                file_name=_fname,
+                mime="text/html",
+                key=f"export_{_nav_key(selected_menu)}",
+                type="secondary",
+            )
 
     if selected_menu in loaded_catalog:
         available_tabs = [m['tab_name'] for m in loaded_catalog[selected_menu]]

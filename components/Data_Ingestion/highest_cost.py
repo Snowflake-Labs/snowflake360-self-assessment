@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.config.design_tokens import (
     BRAND_PRIMARY, BRAND_SECONDARY,
     CHART_SERIES, CHART_EXTENDED,
@@ -71,14 +70,9 @@ def _prefetch_all_highest_cost_queries():
     needed = {k: sql for k, sql in _ALL_HIGHEST_COST_QUERIES.items() if k not in st.session_state}
     if not needed:
         return
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {
-            executor.submit(_run_query_thread, session, k, sql): k
-            for k, sql in needed.items()
-        }
-        for future in as_completed(futures):
-            key, df, err = future.result()
-            st.session_state[key] = df
+    for k, sql in needed.items():
+        key, df, err = _run_query_thread(session, k, sql)
+        st.session_state[key] = df
 
 
 def comp_highest_cost(entry_actions=None):

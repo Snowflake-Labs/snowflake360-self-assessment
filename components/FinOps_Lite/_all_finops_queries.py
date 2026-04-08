@@ -125,6 +125,35 @@ GROUP BY ALL
 ORDER BY "GB Transferred" DESC
 """,
 
+    "fv_daily_cost_trend": """
+SELECT
+    mdh.usage_date AS "Date",
+    ROUND(SUM(mdh.credits_used_compute), 2) AS "Compute Credits",
+    ROUND(SUM(mdh.credits_used_cloud_services), 2) AS "Cloud Services Credits",
+    ROUND(SUM(mdh.credits_used_compute + mdh.credits_used_cloud_services), 2) AS "Total Credits",
+    ROUND(SUM(mdh.credits_used_compute + mdh.credits_used_cloud_services) * 3.0, 2) AS "Total Cost ($)",
+    ROUND(AVG(SUM(mdh.credits_used_compute + mdh.credits_used_cloud_services) * 3.0) OVER (
+        ORDER BY mdh.usage_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+    ), 2) AS "7-Day Rolling Avg ($)"
+FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY mdh
+WHERE mdh.usage_date >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY mdh.usage_date
+ORDER BY mdh.usage_date ASC
+""",
+
+    "fv_service_type_breakdown": """
+SELECT
+    mdh.service_type AS "Service Type",
+    ROUND(SUM(mdh.credits_used), 2) AS "Total Credits",
+    ROUND(SUM(mdh.credits_used) * 3.0, 2) AS "Total Cost ($)",
+    ROUND(SUM(mdh.credits_used) * 3.0 * 12, 0) AS "Est Annual Cost ($)",
+    ROUND(RATIO_TO_REPORT(SUM(mdh.credits_used)) OVER () * 100, 2) AS "% of Total"
+FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY mdh
+WHERE mdh.usage_date >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY mdh.service_type
+ORDER BY "Total Cost ($)" DESC
+""",
+
     "finops_anomalies": """
 SELECT
     date AS "Anomaly Date",
