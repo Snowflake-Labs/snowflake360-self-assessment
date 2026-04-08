@@ -127,55 +127,7 @@ FROM ddl_q
         ddl_df = _cached_sql("fo_ddl", ddl_query)
 
         if not ddl_df.empty:
-            # Create Report Category and Metric
-
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data - this will persist across reruns
-            if 'ddl_operations_metric_obj' not in st.session_state:
-                st.session_state.ddl_operations_metric_obj = DDLOperationsMetric(ddl_df)
-            else:
-                # Update the data if it's changed, but preserve any column customizations
-                if not st.session_state.ddl_operations_metric_obj.has_custom_columns:
-                    df_copy = ddl_df.copy()
-                    df = ddl_df
-
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-                # Create buttons side by side
-                ddl_btn_col1, ddl_btn_col2 = st.columns(2)
-
-                with ddl_btn_col1:
-                    # Gear icon button for "Set table" functionality
-                    ddl_gear_clicked = st.button(
-                        "Set Table", icon=":material/settings:",
-                        key="ddl_operations_gear_btn",
-                        help="Customize table columns and rows",
-                        type="secondary",
-                        use_container_width=True
-                    )
-                    if ddl_gear_clicked:
-                        _show_dialog(st.session_state.ddl_operations_metric_obj, 'display_data', ddl_metric, None, None, None)
-
-                with ddl_btn_col2:
-                    # Report icon button for "Add to report" functionality
-                    ddl_metric_exists = ReportManager().metric_exists(ddl_metric.key)
-                    ddl_report_clicked = st.button(
-                        "Add to Report", icon=":material/add_circle:",
-                        key="ddl_operations_report_btn",
-                        help="Add to report",
-                        type="secondary",
-                        use_container_width=True
-                    )
-                    if ddl_report_clicked:
-                        show_metric_dialog(finops_category, ddl_metric, ddl_metric_exists, False)
-
-            # Display the metric's display_data (this will be modified by the dialog)
-            st.dataframe(
-                df,
-                use_container_width=True
-            )
+            st.dataframe(ddl_df, use_container_width=True)
 
             # Get values for charts
             total_ddl = int(ddl_df['TOTAL_DDL_30D'].iloc[0]) if 'TOTAL_DDL_30D' in ddl_df.columns else 0
@@ -630,55 +582,7 @@ LIMIT 10
         top_ddl_df = _cached_sql("fo_top_ddl", top_ddl_query)
 
         if not top_ddl_df.empty:
-            # Create Report Category and Metric
-
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data - this will persist across reruns
-            if 'top_ddl_patterns_metric_obj' not in st.session_state:
-                st.session_state.top_ddl_patterns_metric_obj = TopDDLPatternsMetric(top_ddl_df)
-            else:
-                # Update the data if it's changed, but preserve any column customizations
-                if not st.session_state.top_ddl_patterns_metric_obj.has_custom_columns:
-                    df_copy = top_ddl_df.copy()
-                    df = top_ddl_df
-
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-                # Create buttons side by side
-                top_ddl_btn_col1, top_ddl_btn_col2 = st.columns(2)
-
-                with top_ddl_btn_col1:
-                    # Gear icon button for "Set table" functionality
-                    top_ddl_gear_clicked = st.button(
-                        "Set Table", icon=":material/settings:",
-                        key="top_ddl_patterns_gear_btn",
-                        help="Customize table columns and rows",
-                        type="secondary",
-                        use_container_width=True
-                    )
-                    if top_ddl_gear_clicked:
-                        _show_dialog(st.session_state.top_ddl_patterns_metric_obj, 'display_data', top_ddl_metric, None, None, None)
-
-                with top_ddl_btn_col2:
-                    # Report icon button for "Add to report" functionality
-                    top_ddl_metric_exists = ReportManager().metric_exists(top_ddl_metric.key)
-                    top_ddl_report_clicked = st.button(
-                        "Add to Report", icon=":material/add_circle:",
-                        key="top_ddl_patterns_report_btn",
-                        help="Add to report",
-                        type="secondary",
-                        use_container_width=True
-                    )
-                    if top_ddl_report_clicked:
-                        show_metric_dialog(finops_category, top_ddl_metric, top_ddl_metric_exists, False)
-
-            # Display the metric's display_data (this will be modified by the dialog)
-            st.dataframe(
-                df,
-                use_container_width=True
-            )
+            st.dataframe(top_ddl_df, use_container_width=True)
 
             # Charts Section - 2 charts per row
             st.markdown("---")
@@ -1139,55 +1043,7 @@ LIMIT 10
         cloning_df = _cached_sql("fo_cloning", cloning_query)
 
         if not cloning_df.empty:
-            # Create Report Category and Metric
-
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data - this will persist across reruns
-            if 'cloning_operations_metric_obj' not in st.session_state:
-                st.session_state.cloning_operations_metric_obj = CloningOperationsMetric(cloning_df)
-            else:
-                # Update the data if it's changed, but preserve any column customizations
-                if not st.session_state.cloning_operations_metric_obj.has_custom_columns:
-                    df_copy = cloning_df.copy()
-                    df = cloning_df
-
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-                # Create buttons side by side
-                cloning_btn_col1, cloning_btn_col2 = st.columns(2)
-
-                with cloning_btn_col1:
-                    # Gear icon button for "Set table" functionality
-                    cloning_gear_clicked = st.button(
-                        "Set Table", icon=":material/settings:",
-                        key="cloning_operations_gear_btn",
-                        help="Customize table columns and rows",
-                        type="secondary",
-                        use_container_width=True
-                    )
-                    if cloning_gear_clicked:
-                        _show_dialog(st.session_state.cloning_operations_metric_obj, 'display_data', cloning_metric, None, None, None)
-
-                with cloning_btn_col2:
-                    # Report icon button for "Add to report" functionality
-                    cloning_metric_exists = ReportManager().metric_exists(cloning_metric.key)
-                    cloning_report_clicked = st.button(
-                        "Add to Report", icon=":material/add_circle:",
-                        key="cloning_operations_report_btn",
-                        help="Add to report",
-                        type="secondary",
-                        use_container_width=True
-                    )
-                    if cloning_report_clicked:
-                        show_metric_dialog(finops_category, cloning_metric, cloning_metric_exists, False)
-
-            # Display the metric's display_data (this will be modified by the dialog)
-            st.dataframe(
-                df,
-                use_container_width=True
-            )
+            st.dataframe(cloning_df, use_container_width=True)
 
             # Charts Section - 2 charts per row
             st.markdown("---")
@@ -1670,16 +1526,9 @@ FROM clone_q
         if not clone_summary_df.empty:
             # Create Report Category and Metric
 
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-
             # Display the table
             st.dataframe(
-                df,
+                clone_summary_df,
                 use_container_width=True
             )
 
@@ -1980,16 +1829,9 @@ LIMIT 10
         if not top_clone_df.empty:
             # Create Report Category and Metric
 
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-
             # Display the table
             st.dataframe(
-                df,
+                top_clone_df,
                 use_container_width=True
             )
 
@@ -2215,16 +2057,9 @@ LIMIT 10
         if not simple_df.empty:
             # Create Report Category and Metric
 
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-
             # Display the table
             st.dataframe(
-                df,
+                simple_df,
                 use_container_width=True
             )
 
@@ -2464,16 +2299,9 @@ LIMIT 10
         if not info_schema_df.empty:
             # Create Report Category and Metric
 
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-
             # Display the table
             st.dataframe(
-                df,
+                info_schema_df,
                 use_container_width=True
             )
 
@@ -2712,16 +2540,9 @@ LIMIT 10
         if not show_df.empty:
             # Create Report Category and Metric
 
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-
             # Display the table
             st.dataframe(
-                df,
+                show_df,
                 use_container_width=True
             )
 
@@ -2960,16 +2781,9 @@ LIMIT 10
         if not inserts_df.empty:
             # Create Report Category and Metric
 
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-
             # Display the table
             st.dataframe(
-                df,
+                inserts_df,
                 use_container_width=True
             )
 
@@ -3208,16 +3022,9 @@ LIMIT 10
         if not complex_df.empty:
             # Create Report Category and Metric
 
-            # Create a proper metric object for the dialogs
-            # Initialize metric with data
-            # Set dataframes for the report metric
-
-            # Create layout with buttons on top-right and table below
-
-
             # Display the table
             st.dataframe(
-                df,
+                complex_df,
                 use_container_width=True
             )
 
@@ -3470,11 +3277,11 @@ def _render_copy_poor_selectivity():
             distinct = df_summary['DISTINCT_COPY_PATTERNS'].iloc[0] if not df_summary.empty else 0
             cs_credits = df_summary['TOTAL_CLOUD_SERVICES_CREDITS'].iloc[0] if not df_summary.empty else 0
             with col1:
-                st.metric("Total COPY Commands (30d)", f"{int(total_copy):,}" if total_copy else "0")
+                st.metric("Total COPY Commands (30d)", f"{int(total_copy):,}" if pd.notna(total_copy) and total_copy else "0")
             with col2:
-                st.metric("Distinct Patterns", f"{int(distinct):,}" if distinct else "0")
+                st.metric("Distinct Patterns", f"{int(distinct):,}" if pd.notna(distinct) and distinct else "0")
             with col3:
-                st.metric("Cloud Services Credits", f"{float(cs_credits):.4f}" if cs_credits else "0.0000")
+                st.metric("Cloud Services Credits", f"{float(cs_credits):.4f}" if pd.notna(cs_credits) and cs_credits else "0.0000")
         if df_patterns.empty:
             st.success("No COPY commands with poor selectivity detected in the last 30 days.")
             return
