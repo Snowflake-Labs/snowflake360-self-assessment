@@ -497,6 +497,8 @@ else:
                             f'Error loading {tab_name}: {str(e)}</div>',
                             unsafe_allow_html=True
                         )
-            st.session_state[f"_topic_ready_{_nav_key(selected_menu)}"] = True
+            if not st.session_state.get(f"_topic_ready_{_nav_key(selected_menu)}", False):
+                st.session_state[f"_topic_ready_{_nav_key(selected_menu)}"] = True
+                st.experimental_rerun()
 
 st.markdown(global_settings.APP_VERSION_FOOTER, unsafe_allow_html=True)
