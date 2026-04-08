@@ -92,12 +92,12 @@ LIMIT 100
             pattern_summary = pd.DataFrame({
                 'Pattern': ['ORDER BY in CTE', 'Sort + Aggregate', 'DISTINCT Optimisation', 'Directed Join', 'Collation', 'ASOF Join'],
                 'Count': [
-                    (df['ORDER_BY_IN_CTE'] == 'Yes').sum(),
-                    (df['SORT_AND_AGG'] == 'Yes').sum(),
-                    (df['DISTINCT_OPTIMIZATION_CHECK'] == 'Consider APPROX').sum(),
-                    (df['USES_DIRECTED_JOIN'] == 'Yes').sum(),
-                    (df['USES_COLLATION'] == 'Yes').sum(),
-                    (df['USES_ASOF_JOIN'] == 'Yes').sum()
+                    df['ORDER_BY_IN_CTE'].str.contains('Yes', case=False, na=False).sum(),
+                    df['SORT_AND_AGG'].str.contains('Yes', case=False, na=False).sum(),
+                    df['DISTINCT_OPTIMIZATION_CHECK'].str.contains('APPROX', case=False, na=False).sum(),
+                    df['USES_DIRECTED_JOIN'].str.contains('Yes', case=False, na=False).sum(),
+                    df['USES_COLLATION'].str.contains('Yes', case=False, na=False).sum(),
+                    df['USES_ASOF_JOIN'].str.contains('Yes', case=False, na=False).sum()
                 ]
             })
 
@@ -120,7 +120,7 @@ LIMIT 100
             with col2.container():
                 st.markdown("##### All Patterns (incl. zero)")
                 plot_all = pattern_summary.sort_values('Count', ascending=True)
-                colors = [_C2 if v > 0 else '#d3d3d3' for v in plot_all['Count']]
+                colors = [_C2 if v > 0 else _C1 for v in plot_all['Count']]
                 fig = go.Figure(data=[go.Bar(
                     y=plot_all['Pattern'], x=plot_all['Count'], orientation='h',
                     marker_color=colors, text=[f"{int(v)}" for v in plot_all['Count']],
@@ -133,7 +133,7 @@ LIMIT 100
             col3, col4 = st.columns(2)
             with col3.container():
                 st.markdown("##### DISTINCT Optimisation Candidates")
-                candidates = (df['DISTINCT_OPTIMIZATION_CHECK'] == 'Consider APPROX').sum()
+                candidates = df['DISTINCT_OPTIMIZATION_CHECK'].str.contains('APPROX', case=False, na=False).sum()
                 non_candidates = len(df) - candidates
                 fig = go.Figure(data=[go.Pie(
                     labels=['\u26a0\ufe0f APPROX Candidates', '\u2705 No Optimisation'],

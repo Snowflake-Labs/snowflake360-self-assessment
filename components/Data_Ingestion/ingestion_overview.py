@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .bulk_load_analysis import comp_bulk_load_analysis
 from .snowpipe_analysis import comp_snowpipe_analysis
 from .ingestion_summary import comp_ingestion_summary
@@ -47,17 +48,21 @@ def _prefetch_all_ingestion_queries(progress_bar=None, status_text=None):
         return
     total = len(needed)
     completed = 0
-    for k, sql in needed.items():
+    def _run(s, k, q):
         try:
-            df = session.sql(sql).to_pandas()
-        except Exception:
-            df = pd.DataFrame()
-        st.session_state[k] = df
-        completed += 1
-        if progress_bar is not None:
-            progress_bar.progress(completed / total)
-        if status_text is not None:
-            status_text.text(f"Loading data... ({completed}/{total} queries)")
+            return k, s.sql(q).to_pandas(), None
+        except Exception as e:
+            return k, pd.DataFrame(), e
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_run, session, k, sql): k for k, sql in needed.items()}
+        for future in as_completed(futures):
+            key, df, err = future.result()
+            st.session_state[key] = df
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.progress(completed / total)
+            if status_text is not None:
+                status_text.text(f"Loading data... ({completed}/{total} queries)")
 
 
 def _render_snowpipe_streaming():

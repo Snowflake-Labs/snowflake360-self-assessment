@@ -353,11 +353,10 @@ else:
                 return TOPIC_EXPORTERS[menu](_acct).encode()
             st.download_button(
                 label="Export Telemetry for Printing",
-                data=_gen_export,
+                data=_gen_export(),
                 file_name=_fname,
                 mime="text/html",
                 key=f"export_{_nav_key(selected_menu)}",
-
             )
 
     if selected_menu in loaded_catalog:

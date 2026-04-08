@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.config.design_tokens import (
     BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY, BRAND_ACCENT,
     CHART_SERIES, CHART_EXTENDED,
@@ -38,14 +39,16 @@ def _prefetch_all_governance_queries(progress_bar=None, status_text=None):
         return
     total = len(needed)
     completed = 0
-    for k, sql in needed.items():
-        key, df, err = _run_query_thread(session, k, sql)
-        st.session_state[key] = df
-        completed += 1
-        if progress_bar is not None:
-            progress_bar.progress(completed / total)
-        if status_text is not None:
-            status_text.text(f"Loading data... ({completed}/{total} queries)")
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_run_query_thread, session, k, sql): k for k, sql in needed.items()}
+        for future in as_completed(futures):
+            key, df, err = future.result()
+            st.session_state[key] = df
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.progress(completed / total)
+            if status_text is not None:
+                status_text.text(f"Loading data... ({completed}/{total} queries)")
     if progress_bar is not None:
         progress_bar.empty()
     if status_text is not None:

@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .finops_visibility import comp_finops_visibility
 from .finops_control import comp_finops_control
 from .finops_optimization import comp_finops_optimization
@@ -36,15 +37,22 @@ def _prefetch_all_finops_queries(progress_bar=None, status_text=None):
         return
     total = len(needed)
     completed = 0
-    for k, sql in needed.items():
-        resolved = sql.replace("{credit_price}", str(cp)).replace("{storage_price}", str(sp))
-        key, df, err = _run_query_thread(session, k, resolved)
-        st.session_state[key] = df
-        completed += 1
-        if progress_bar is not None:
-            progress_bar.progress(completed / total)
-        if status_text is not None:
-            status_text.text(f"Loading data... ({completed}/{total} queries)")
+    def _run(s, k, q):
+        resolved = q.replace("{credit_price}", str(cp)).replace("{storage_price}", str(sp))
+        try:
+            return k, s.sql(resolved).to_pandas(), None
+        except Exception as e:
+            return k, pd.DataFrame(), e
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_run, session, k, sql): k for k, sql in needed.items()}
+        for future in as_completed(futures):
+            key, df, err = future.result()
+            st.session_state[key] = df
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.progress(completed / total)
+            if status_text is not None:
+                status_text.text(f"Loading data... ({completed}/{total} queries)")
 
 
 def comp_finops_overview(entry_actions=None):

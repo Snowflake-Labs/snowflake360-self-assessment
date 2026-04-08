@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.config.design_tokens import (
     BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY, BRAND_ACCENT,
     CHART_SERIES, CHART_EXTENDED,
@@ -447,6 +448,13 @@ _ALL_WH_QUERIES = {
 }
 
 
+def _run_query_thread(session, key, sql):
+    try:
+        return key, session.sql(sql).to_pandas(), None
+    except Exception as e:
+        return key, pd.DataFrame(), e
+
+
 def _prefetch_all_wh_queries(progress_bar=None, status_text=None):
     session = st.session_state.get("session")
     if not session:
@@ -456,17 +464,16 @@ def _prefetch_all_wh_queries(progress_bar=None, status_text=None):
         return
     total = len(needed)
     completed = 0
-    for k, sql in needed.items():
-        try:
-            df = session.sql(sql).to_pandas()
-        except Exception:
-            df = pd.DataFrame()
-        st.session_state[k] = df
-        completed += 1
-        if progress_bar is not None:
-            progress_bar.progress(completed / total)
-        if status_text is not None:
-            status_text.text(f"Loading data... ({completed}/{total} queries)")
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_run_query_thread, session, k, sql): k for k, sql in needed.items()}
+        for future in as_completed(futures):
+            key, df, err = future.result()
+            st.session_state[key] = df
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.progress(completed / total)
+            if status_text is not None:
+                status_text.text(f"Loading data... ({completed}/{total} queries)")
 
 
 def comp_warehouse_overview(entry_actions=None):
