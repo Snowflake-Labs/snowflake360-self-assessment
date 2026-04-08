@@ -99,68 +99,8 @@ def comp_git_integration(entry_actions=None):
 # ============================
 
 def _render_git_table(df):
-    """Render Git Integration data table with Set Table and Add to Report buttons."""
-
-    # Create Report Category and Metric for Git integration analysis
-    git_category = ReportCategory('data_recovery_devops', 'Data Recovery & DevOps')
-    git_metric = ReportMetric('git_integration_activity', 'data_recovery_devops', 'Git Integration Activity Analysis')
-
-    # Create a proper metric object for the dialogs
-    class GitMetric:
-        def __init__(self, data):
-            self.display_data = data
-            self.display_data_copy = data.copy()
-            self.has_custom_columns = False
-
-    # Initialize Git metric with data - this will persist across reruns
-    if 'git_metric_obj' not in st.session_state:
-        st.session_state.git_metric_obj = GitMetric(df)
-    else:
-        # Update the data if it's changed, but preserve any column customizations
-        if not st.session_state.git_metric_obj.has_custom_columns:
-            st.session_state.git_metric_obj.display_data_copy = df.copy()
-            st.session_state.git_metric_obj.display_data = df
-
-    # Set dataframes for the report metric
-    git_metric.dataframes = [st.session_state.git_metric_obj.display_data]
-
-    # Create layout with buttons on top-right and table below
-    button_row_empty, button_row_col = st.columns([0.75, 0.25])
-
-    with button_row_col:
-        # Create buttons side by side
-        btn_col1, btn_col2 = st.columns(2)
-
-        with btn_col1:
-            # Gear icon button for "Set table" functionality
-            gear_clicked = st.button(
-                "Set Table", icon=":material/settings:",
-                key="git_config_gear_btn",
-                help="Customize table columns and rows",
-                type="secondary",
-                use_container_width=True
-            )
-            if gear_clicked:
-                _show_dialog(st.session_state.git_metric_obj, 'display_data', git_metric, None, None, None)
-
-        with btn_col2:
-            # Report icon button for "Add to report" functionality
-            metric_exists = ReportManager().metric_exists(git_metric.key)
-            report_clicked = st.button(
-                "Add to Report", icon=":material/add_circle:",
-                key="git_config_report_btn",
-                help="Add to report",
-                type="secondary",
-                use_container_width=True
-            )
-            if report_clicked:
-                show_metric_dialog(git_category, git_metric, metric_exists, False)
-
-    # Display the metric's display_data (this will be modified by the dialog)
-    st.dataframe(
-        st.session_state.git_metric_obj.display_data,
-        use_container_width=True
-    )
+    """Render Git Integration data table."""
+    st.dataframe(df, use_container_width=True)
 
 
 # ============================
