@@ -21,19 +21,19 @@ deploy_to_snowflake:
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   before_script:
-    - pip install snowflake-cli-labs --quiet
+    - pip install snowflake-cli --quiet
+    - mkdir -p ~/.snowflake
     - |
-      mkdir -p ~/.snowflake
       cat > ~/.snowflake/config.toml <<EOF
-      default_connection_name = "${SNOWFLAKE_CONNECTION_NAME}"
+      default_connection_name = "au_demo44"
 
-      [connections.${SNOWFLAKE_CONNECTION_NAME}]
+      [connections.au_demo44]
       account = "${SNOWFLAKE_ACCOUNT}"
       user = "${SNOWFLAKE_USER}"
       password = "${SNOWFLAKE_PASSWORD}"
       role = "${SNOWFLAKE_ROLE}"
       warehouse = "${SNOWFLAKE_WAREHOUSE}"
       EOF
-      chmod 600 ~/.snowflake/config.toml
+    - chmod 600 ~/.snowflake/config.toml
   script:
     - snow streamlit deploy --connection $SNOWFLAKE_CONNECTION_NAME --replace --prune

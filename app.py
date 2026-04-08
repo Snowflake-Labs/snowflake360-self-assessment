@@ -445,38 +445,29 @@ else:
             unsafe_allow_html=True
         )
     with _hdr_right:
-        if selected_menu in TOPIC_EXPORTERS:
+        if selected_menu in TOPIC_EXPORTERS and st.session_state.get(f"_topic_ready_{_nav_key(selected_menu)}", False):
             st.markdown('<span class="telemetry-btn-anchor"></span>', unsafe_allow_html=True)
             _export_key = f"export_{_nav_key(selected_menu)}"
             if st.button("Export Telemetry for Printing", key=_export_key, type="secondary"):
-                st.session_state[f"_run_export_{selected_menu}"] = True
-
-    if st.session_state.get(f"_run_export_{selected_menu}"):
-        st.session_state[f"_run_export_{selected_menu}"] = False
-        _exp_progress = st.progress(0, text="Generating export...")
-        try:
-            _exp_progress.progress(20, text="Collecting cached data...")
-            _account = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
-            _exp_progress.progress(50, text="Building HTML report...")
-            _html_content = TOPIC_EXPORTERS[selected_menu](_account)
-            _exp_progress.progress(90, text="Preparing download...")
-            _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
-            _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            _exp_progress.progress(100, text="Ready!")
-            import base64
-            _b64 = base64.b64encode(_html_content.encode()).decode()
-            components.html(f"""
-            <script>
-            var a = document.createElement('a');
-            a.href = 'data:text/html;base64,{_b64}';
-            a.download = '{_fname}';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            </script>
-            """, height=0)
-        except Exception as _exp_err:
-            st.error(f"Export failed: {_exp_err}")
+                _exp_ph = st.empty()
+                try:
+                    with _exp_ph.container():
+                        with st.spinner("Generating export..."):
+                            _account = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
+                            _html_content = TOPIC_EXPORTERS[selected_menu](_account)
+                    _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
+                    _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                    import base64
+                    _b64 = base64.b64encode(_html_content.encode()).decode()
+                    _exp_ph.empty()
+                    components.html(f"""<script>
+                    var a=document.createElement('a');
+                    a.href='data:text/html;base64,{_b64}';
+                    a.download='{_fname}';
+                    document.body.appendChild(a);a.click();document.body.removeChild(a);
+                    </script>""", height=0)
+                except Exception as _exp_err:
+                    _exp_ph.error(f"Export failed: {_exp_err}")
 
     if selected_menu in loaded_catalog:
         available_tabs = [m['tab_name'] for m in loaded_catalog[selected_menu]]
@@ -506,5 +497,6 @@ else:
                             f'Error loading {tab_name}: {str(e)}</div>',
                             unsafe_allow_html=True
                         )
+            st.session_state[f"_topic_ready_{_nav_key(selected_menu)}"] = True
 
 st.markdown(global_settings.APP_VERSION_FOOTER, unsafe_allow_html=True)
