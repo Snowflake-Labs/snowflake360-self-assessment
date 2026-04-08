@@ -1,3 +1,17 @@
 __pycache__/
-output/
 *.pyc
+*.pyo
+
+# snow CLI build artifacts
+output/
+
+# macOS
+.DS_Store
+
+# Local env files — never commit credentials
+.env
+.snowflake/
+
+# Editor
+.vscode/
+.idea/

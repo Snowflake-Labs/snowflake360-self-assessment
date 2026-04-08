@@ -1,29 +1,39 @@
-# You can override the included template(s) by including variable overrides
-# SAST customization: https://docs.gitlab.com/user/application_security/sast/#available-cicd-variables
-# Secret Detection customization: https://docs.gitlab.com/user/application_security/secret_detection/pipeline/configure/
-# Dependency Scanning customization: https://docs.gitlab.com/user/application_security/dependency_scanning/#customizing-analyzer-behavior
-# Container Scanning customization: https://docs.gitlab.com/user/application_security/container_scanning/#customizing-analyzer-behavior
-# Note that environment variables can be set in several places
-# See https://docs.gitlab.com/ci/variables/#cicd-variable-precedence
 stages:
-- build
-- test
-- deploy
-- review
-- dast
-- staging
-- canary
-- production
-- incremental rollout 10%
-- incremental rollout 25%
-- incremental rollout 50%
-- incremental rollout 100%
-- performance
-- cleanup
-- secret-detection
+  - deploy
+
 variables:
-  SECRET_DETECTION_ENABLED: 'true'
-secret_detection:
-  stage: secret-detection
-include:
-- template: Auto-DevOps.gitlab-ci.yml
+  SNOWFLAKE_CONNECTION_NAME: au_demo44
+
+# Deploys the Streamlit app to Snowflake on every push to main.
+#
+# Required CI/CD variables (set in GitLab → Settings → CI/CD → Variables):
+#   SNOWFLAKE_ACCOUNT    - e.g. au_demo44.ap-southeast-2
+#   SNOWFLAKE_USER       - service account username
+#   SNOWFLAKE_PASSWORD   - service account password (mark as Masked)
+#   SNOWFLAKE_ROLE       - e.g. ACCOUNTADMIN
+#   SNOWFLAKE_WAREHOUSE  - e.g. ADMIN_XSMALL
+#
+# The target app and stage are defined in snowflake.yml — do not override them here.
+
+deploy_to_snowflake:
+  stage: deploy
+  image: python:3.11-slim
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - pip install snowflake-cli-labs --quiet
+    - |
+      mkdir -p ~/.snowflake
+      cat > ~/.snowflake/config.toml <<EOF
+      default_connection_name = "${SNOWFLAKE_CONNECTION_NAME}"
+
+      [connections.${SNOWFLAKE_CONNECTION_NAME}]
+      account = "${SNOWFLAKE_ACCOUNT}"
+      user = "${SNOWFLAKE_USER}"
+      password = "${SNOWFLAKE_PASSWORD}"
+      role = "${SNOWFLAKE_ROLE}"
+      warehouse = "${SNOWFLAKE_WAREHOUSE}"
+      EOF
+      chmod 600 ~/.snowflake/config.toml
+  script:
+    - snow streamlit deploy --connection $SNOWFLAKE_CONNECTION_NAME --replace --prune
