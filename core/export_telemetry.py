@@ -112,23 +112,14 @@ def _fmt_num(val: Any, decimals: int = 2) -> str:
         return str(val)
 
 
-def _make_doughnut(chart_id: str, labels: list, data: list | None = None,
-                   colors: list | None = None, datasets: list[dict] | None = None,
-                   title: str = "") -> str:
-    if datasets:
-        for ds in datasets:
-            if "backgroundColor" not in ds:
-                ds["backgroundColor"] = _COLORS[: len(ds.get("data", []))]
-        cfg = json.dumps({"labels": labels, "datasets": datasets})
-    else:
-        colors = colors or _COLORS[: len(data)]
-        cfg = json.dumps({
-            "labels": labels,
-            "datasets": [{"data": data, "backgroundColor": colors}],
-        })
-    display_title = title or (_esc(labels[0]) if len(labels) == 1 else "")
+def _make_doughnut(chart_id: str, labels: list, data: list, colors: list | None = None) -> str:
+    colors = colors or _COLORS[: len(data)]
+    cfg = json.dumps({
+        "labels": labels,
+        "datasets": [{"data": data, "backgroundColor": colors}],
+    })
     return f"""<div class="chart-block">
-    <div class="chart-title">{display_title}</div>
+    <div class="chart-title">{_esc(labels[0] if len(labels) == 1 else "")}</div>
     <div style="position:relative;height:274px;width:100%;">
         <canvas id="{chart_id}"></canvas>
     </div>
@@ -299,58 +290,6 @@ def _analysis_block(title: str, content: str) -> str:
     )
 
 
-def _make_gauge(chart_id: str, score: float, max_score: float = 3.0,
-                color: str = "#F39C12", title: str = "") -> str:
-    pct = min(score / max_score, 1.0) if max_score else 0
-    filled = round(pct * 50, 2)
-    unfilled = round((1 - pct) * 50, 2)
-    mid = f"{max_score / 2:.1f}"
-    data_json = json.dumps([filled, unfilled, 50])
-    colors_json = json.dumps([color, "#E5E7EB", "transparent"])
-    return f"""<div class="chart-block" style="height:260px; position:relative;">
-  <div class="chart-title">{_esc(title)}</div>
-  <div style="position:relative; height:224px;">
-    <canvas id="{chart_id}"></canvas>
-    <div style="position:absolute; bottom:8%; left:50%; transform:translateX(-50%);
-                font-size:1.6rem; font-weight:700; color:{color}; pointer-events:none;">
-      {score:.2f}
-    </div>
-    <div style="position:absolute; bottom:2%; left:50%; transform:translateX(-50%);
-                font-size:0.72rem; color:#6b7280; pointer-events:none;">
-      0 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {mid} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {max_score:.0f}
-    </div>
-  </div>
-  <script>
-  (function(){{
-    var ctx = document.getElementById('{chart_id}').getContext('2d');
-    new Chart(ctx, {{
-      type: 'doughnut',
-      data: {{
-        datasets: [{{
-          data: {data_json},
-          backgroundColor: {colors_json},
-          borderWidth: 0,
-          borderColor: 'transparent'
-        }}]
-      }},
-      options: {{
-        rotation: -90,
-        circumference: 180,
-        cutout: '70%',
-        plugins: {{
-          legend: {{ display: false }},
-          tooltip: {{ enabled: false }},
-          datalabels: {{ display: false }}
-        }},
-        responsive: true,
-        maintainAspectRatio: false
-      }}
-    }});
-  }})();
-  </script>
-</div>"""
-
-
 def build_chart(chart_type: str, **kwargs) -> str:
     cid = _next_chart_id()
     if chart_type == "doughnut":
@@ -361,8 +300,6 @@ def build_chart(chart_type: str, **kwargs) -> str:
         return _make_vbar(cid, **kwargs)
     elif chart_type == "line":
         return _make_line(cid, **kwargs)
-    elif chart_type == "gauge":
-        return _make_gauge(cid, **kwargs)
     return ""
 
 

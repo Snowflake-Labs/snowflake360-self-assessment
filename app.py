@@ -1,29 +1,38 @@
 import streamlit as st
-import streamlit.components.v1 as components
-import base64
-from datetime import datetime
-from snowflake.snowpark.context import get_active_session
-import core as cr
-from components.local import load_catalog
-from components.Analysis.invoke_metrics_comps import get_analysis_comp_handler
-from core.config.design_tokens import (
-    BRAND_PRIMARY, BRAND_SECONDARY,
-    SURFACE_ALT, SURFACE_BASE,
-    TEXT_SECONDARY, TEXT_HEADING,
-    TEXT_INVERSE,
-    ERROR,
-    CSS_CUSTOM_PROPERTIES,
-)
-from core.export_collectors import TOPIC_EXPORTERS
-from components.Database_Management.db_overview import _query_cache as _db_cache
-
-global_settings = cr.config
+import traceback as _tb
+import time as _time
 
 st.set_page_config(
     page_title="Snowflake 360 Self-Assessment",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+_import_err = None
+try:
+    import streamlit.components.v1 as components
+    from datetime import datetime
+    from snowflake.snowpark.context import get_active_session
+    import core as cr
+    from components.local import load_catalog
+    from components.Analysis.invoke_metrics_comps import get_analysis_comp_handler
+    from core.config.design_tokens import (
+        BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY,
+        SURFACE_ALT, SURFACE_BASE,
+        TEXT_SECONDARY, TEXT_HEADING,
+        TEXT_INVERSE,
+        ERROR, SUCCESS,
+        CSS_CUSTOM_PROPERTIES,
+    )
+    from core.export_collectors import TOPIC_EXPORTERS
+    global_settings = cr.config
+except Exception as _e:
+    _import_err = _tb.format_exc()
+
+if _import_err:
+    st.error("App failed to start — import error:")
+    st.code(_import_err)
+    st.stop()
 
 st.markdown(global_settings.MAIN_MARKDOWN_BODY, unsafe_allow_html=True)
 st.markdown(global_settings.DEFAULT2_MARKDOWN_BODY, unsafe_allow_html=True)
@@ -57,6 +66,10 @@ st.markdown(f"""
         font-weight: 400 !important;
         padding: 12px 16px !important;
         text-align: center !important;
+    }}
+    div[data-testid="stSidebar"] .stButton > button:hover {{
+        border: 2px solid {BRAND_PRIMARY} !important;
+        color: {BRAND_PRIMARY} !important;
     }}
 
     .stTabs [data-baseweb="tab-highlight"] {{
@@ -123,6 +136,35 @@ st.markdown(f"""
         border: none !important;
     }}
     .telemetry-btn-anchor {{ display: none; }}
+    [data-testid="stCheckbox"] label[aria-checked="true"] [data-baseweb="checkbox"] {{
+        background-color: {BRAND_PRIMARY} !important;
+        border-color: {BRAND_PRIMARY} !important;
+    }}
+    [data-testid="stCheckbox"] label [data-baseweb="checkbox"] {{
+        border-color: {BRAND_PRIMARY} !important;
+    }}
+    div[data-testid="column"]:has(.run-charts-btn-anchor) button {{
+        background-color: {BRAND_PRIMARY} !important;
+        color: white !important;
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+    }}
+    div[data-testid="column"]:has(.run-charts-btn-anchor) button:hover {{
+        background-color: {BRAND_PRIMARY_DARK} !important;
+        color: white !important;
+        border: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+    }}
+    div[data-testid="column"]:has(.run-charts-btn-anchor) button:focus,
+    div[data-testid="column"]:has(.run-charts-btn-anchor) button:focus-visible,
+    div[data-testid="column"]:has(.run-charts-btn-anchor) button:active {{
+        box-shadow: none !important;
+        outline: none !important;
+        border: none !important;
+    }}
+    .run-charts-btn-anchor {{ display: none; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -169,27 +211,18 @@ def _nav_key(label):
         safe = safe.replace(ch, '_')
     return f"nav_{safe}"
 
-
-_EXPORT_SENTINELS = {
-    "Database Management":    lambda: bool(_db_cache),
-    "Virtual Warehouses":     lambda: "wh_fleet_data" in st.session_state,
-    "Access Control":         lambda: "auth_role_hygiene" in st.session_state,
-    "Data Ingestion":         lambda: "di_copy_analysis" in st.session_state,
-    "Data Transformation":    lambda: "tf_overview" in st.session_state,
-    "FinOps (lite)":          lambda: "fv_exec_forecast" in st.session_state,
-    "Data Recovery & DevOps": lambda: "rd_dcm_adoption" in st.session_state,
-    "Data Governance":        lambda: "dg_health_score_data" in st.session_state,
-}
-
-def _export_ready(topic: str) -> bool:
-    checker = _EXPORT_SENTINELS.get(topic)
-    return bool(checker()) if checker else False
-
 if 'selected_menu' not in st.session_state:
     st.session_state.selected_menu = "Home" if "Home" in menu_options else (menu_options[0] if menu_options else None)
 
 if 'topic_nav_count' not in st.session_state:
     st.session_state.topic_nav_count = 0
+
+if '_charts_completed' not in st.session_state:
+    st.session_state._charts_completed = set()
+if '_charts_running' not in st.session_state:
+    st.session_state._charts_running = False
+
+_core_topics = [t for t in menu_options if t != "Home"]
 
 with st.sidebar:
     st.markdown(
@@ -210,8 +243,10 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
-    for topic in [t for t in menu_options if t != "Home"]:
-        if st.button(topic, key=_nav_key(topic), use_container_width=True, type="secondary"):
+    for topic in _core_topics:
+        _lbl = f"\u2705 {topic}" if topic in st.session_state._charts_completed else topic
+        if st.button(_lbl, key=_nav_key(topic), use_container_width=True, type="secondary",
+                     disabled=st.session_state._charts_running):
             if st.session_state.selected_menu != topic:
                 st.session_state.topic_nav_count += 1
             st.session_state.selected_menu = topic
@@ -252,32 +287,41 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
 
     _features = [
         ("Database Management", "Analyse database storage, clustering efficiency, table lifespan, and churn patterns to optimise your data footprint."),
-        ("Virtual Warehouses", "Monitor warehouse scaling, performance metrics, and identify right-sizing opportunities."),
-        ("Data Ingestion", "Evaluate bulk-load and Snowpipe ingestion costs, patterns, and efficiency."),
-        ("FinOps (lite)", "Gain visibility, control, and optimisation insights into your Snowflake spend."),
         ("Data Governance", "Review governance health scores, sensitivity heatmaps, policy inventory, tagging, privacy, and lineage."),
+        ("Virtual Warehouses", "Monitor warehouse scaling, performance metrics, and identify right-sizing opportunities."),
         ("Access Control", "Audit authorisation, authentication, and network policies for security best practices."),
+        ("Data Ingestion", "Evaluate bulk-load and Snowpipe ingestion costs, patterns, and efficiency."),
         ("Data Transformation", "Identify problematic queries, syntax issues, object structure, and workload shapes."),
+        ("FinOps (lite)", "Gain visibility, control, and optimisation insights into your Snowflake spend."),
         ("Data Recovery & DevOps", "Assess data continuity management, Git adoption, CI/CD, and Dynamic Tables usage."),
     ]
 
-    items_html = "".join(
-        f'<li style="margin-bottom: 16px;">'
-        f'<strong style="color: {BRAND_PRIMARY};">{title}</strong><br>'
-        f'<span style="color: {TEXT_SECONDARY};">{desc}</span>'
-        f'</li>'
-        for title, desc in _features
-    )
-    st.markdown(
-        f'<ul style="list-style-type: disc; padding-left: 24px; margin-top: 8px;">'
-        f'{items_html}'
-        f'</ul>',
-        unsafe_allow_html=True
-    )
+    def _on_topic_cb_change():
+        st.session_state['_all_charts_cb'] = False
+
+    for _title, _desc in _features:
+        _cb_col, _txt_col = st.columns([0.4, 9.6])
+        with _cb_col:
+            _ck = f"_cb_{_nav_key(_title)}"
+            st.checkbox(
+                _title, key=_ck, label_visibility="collapsed",
+                disabled=st.session_state._charts_running,
+                on_change=_on_topic_cb_change,
+            )
+        with _txt_col:
+            _done_icon = f' <span style="color:{SUCCESS};">\u2705</span>' if _title in st.session_state._charts_completed else ''
+            st.markdown(
+                f'<div style="margin-top: 2px;">'
+                f'<strong style="color: {BRAND_PRIMARY};">{_title}</strong>{_done_icon}<br>'
+                f'<span style="color: {TEXT_SECONDARY}; font-size: 0.9rem;">{_desc}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
     st.markdown(
         '<p style="color: #C0392B; font-weight: 700; font-size: 1rem; margin-top: 16px;">'
-        'Warning: Clicking on a Topic button on the left will kick off the analysis that can take over a minute to complete<br>'
-        'Each Topic will also use AI to generate analysis based on those topics'
+        'Warning: Clicking on a Topic button on the left will kick off the analysis that can take over a minute to complete. '
+        'Each Topic will also use AI to generate analysis based on those topics.'
         '</p>',
         unsafe_allow_html=True
     )
@@ -310,7 +354,7 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
     if "selected_llm" not in st.session_state:
         st.session_state.selected_llm = "claude-3-7-sonnet"
 
-    _llm_col, _test_col = st.columns([3, 1])
+    _llm_col, _test_col, _all_col, _run_col = st.columns([3, 0.6, 1.2, 1.2])
     with _llm_col:
         _chosen = st.selectbox(
             "Choose LLM",
@@ -324,6 +368,61 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
     with _test_col:
         if st.button("Test", key="_test_llm", type="secondary"):
             st.session_state._llm_test_running = True
+    def _on_all_charts_change():
+        if st.session_state.get('_all_charts_cb', False):
+            for _t, _ in _features:
+                st.session_state[f"_cb_{_nav_key(_t)}"] = False
+
+    with _all_col:
+        _all_charts = st.checkbox("All charts", key="_all_charts_cb",
+                                  disabled=st.session_state._charts_running,
+                                  on_change=_on_all_charts_change)
+    with _run_col:
+        st.markdown('<div class="run-charts-btn-anchor"></div>', unsafe_allow_html=True)
+        _run_clicked = st.button("Run Charts", key="_run_charts_btn", type="primary",
+                                 disabled=st.session_state._charts_running)
+
+    _selected_topics = []
+    if _all_charts:
+        _selected_topics = [t for t, _ in _features]
+    else:
+        for _title, _ in _features:
+            _ck = f"_cb_{_nav_key(_title)}"
+            if st.session_state.get(_ck, False):
+                _selected_topics.append(_title)
+
+    st.session_state['_chart_sel'] = set(_selected_topics)
+
+    if _run_clicked and _selected_topics:
+        st.session_state._charts_running = True
+        _overview_fns = {}
+        for _t in _selected_topics:
+            if _t in loaded_catalog and loaded_catalog[_t]:
+                _first_tab = loaded_catalog[_t][0]
+                _fn_ref = _first_tab.get('fn', '')
+                if _fn_ref and '.' in _fn_ref:
+                    _overview_fns[_t] = _fn_ref.split('.')[-1]
+
+        _total = len(_overview_fns)
+        if _total > 0:
+            _prog = st.progress(0, text="Pre-warming charts...")
+            _handler = get_analysis_comp_handler()
+            for _i, (_topic, _method) in enumerate(_overview_fns.items()):
+                _prog.progress((_i) / _total, text=f"Loading {_topic}...")
+                try:
+                    if hasattr(_handler, _method):
+                        _scratch = st.empty()
+                        with _scratch.container():
+                            getattr(_handler, _method)()
+                        _scratch.empty()
+                        st.session_state._charts_completed.add(_topic)
+                except Exception:
+                    pass
+            _prog.progress(1.0, text="All charts loaded!")
+            _time.sleep(1)
+            _prog.empty()
+        st.session_state._charts_running = False
+        st.experimental_rerun()
 
     if st.session_state.get("_llm_test_running"):
         st.session_state._llm_test_running = False
@@ -345,7 +444,39 @@ else:
             f"<h3 style='margin-top: 0px; margin-bottom: 16px; font-size: 1.75rem; line-height: 1.2;'>{selected_menu}</h3>",
             unsafe_allow_html=True
         )
-    _export_placeholder = _hdr_right.empty()
+    with _hdr_right:
+        if selected_menu in TOPIC_EXPORTERS:
+            st.markdown('<span class="telemetry-btn-anchor"></span>', unsafe_allow_html=True)
+            _export_key = f"export_{_nav_key(selected_menu)}"
+            if st.button("Export Telemetry for Printing", key=_export_key, type="secondary"):
+                st.session_state[f"_run_export_{selected_menu}"] = True
+
+    if st.session_state.get(f"_run_export_{selected_menu}"):
+        st.session_state[f"_run_export_{selected_menu}"] = False
+        _exp_progress = st.progress(0, text="Generating export...")
+        try:
+            _exp_progress.progress(20, text="Collecting cached data...")
+            _account = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
+            _exp_progress.progress(50, text="Building HTML report...")
+            _html_content = TOPIC_EXPORTERS[selected_menu](_account)
+            _exp_progress.progress(90, text="Preparing download...")
+            _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
+            _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            _exp_progress.progress(100, text="Ready!")
+            import base64
+            _b64 = base64.b64encode(_html_content.encode()).decode()
+            components.html(f"""
+            <script>
+            var a = document.createElement('a');
+            a.href = 'data:text/html;base64,{_b64}';
+            a.download = '{_fname}';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            </script>
+            """, height=0)
+        except Exception as _exp_err:
+            st.error(f"Export failed: {_exp_err}")
 
     if selected_menu in loaded_catalog:
         available_tabs = [m['tab_name'] for m in loaded_catalog[selected_menu]]
@@ -375,25 +506,5 @@ else:
                             f'Error loading {tab_name}: {str(e)}</div>',
                             unsafe_allow_html=True
                         )
-
-    if selected_menu in TOPIC_EXPORTERS and _export_ready(selected_menu):
-        with _export_placeholder.container():
-            _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
-            _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            def _gen_export(menu=selected_menu, fname=_fname):
-                _acct = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
-                return TOPIC_EXPORTERS[menu](_acct)
-            _html_str = _gen_export()
-            _b64 = base64.b64encode(_html_str.encode()).decode()
-            _href = f'data:text/html;base64,{_b64}'
-            st.markdown(
-                f'<a href="{_href}" download="{_fname}" '
-                f'style="display:inline-block;width:100%;text-align:center;padding:0.5rem 1rem;'
-                f'background-color:{BRAND_PRIMARY};color:#fff;border-radius:0.5rem;'
-                f'text-decoration:none;font-size:0.875rem;font-weight:600;'
-                f'box-sizing:border-box;">'
-                f'Export Telemetry for Printing</a>',
-                unsafe_allow_html=True,
-            )
 
 st.markdown(global_settings.APP_VERSION_FOOTER, unsafe_allow_html=True)

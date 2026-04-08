@@ -1,0 +1,19 @@
+definition_version: 2
+entities:
+  s360_self_assessment:
+    type: streamlit
+    identifier:
+      name: S360_SELF_ASSESSMENT
+      schema: __SCHEMA__
+      database: __DATABASE__
+    title: "Snowflake 360 Self-Assessment"
+    main_file: app.py
+    query_warehouse: __WAREHOUSE__
+    stage: __DATABASE__.__SCHEMA__.S360_SELF_ASSESSMENT
+    artifacts:
+      - app.py
+      - environment.yml
+      - .streamlit/
+      - core/
+      - components/
+      - metrics/

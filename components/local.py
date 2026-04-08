@@ -1,4 +1,3 @@
-import os
 from functools import partial
 import streamlit as st
 import core as cr
@@ -11,7 +10,6 @@ OPTION_ENTRY = 'option'
 CLASS_METRIC_ENTRY = 'class_metric'
 ENTRY_ACTIONS = 'entry_actions'
 
-current_path = os.path.dirname(os.path.abspath(__file__))
 required_component_entries = {OPTION_ENTRY, CLASS_METRIC_ENTRY}
 
 

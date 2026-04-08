@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.config.design_tokens import (
-    BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY, BRAND_ACCENT,
+    BRAND_PRIMARY, BRAND_SECONDARY,
     CHART_SERIES, CHART_EXTENDED,
 )
 from .object_tagging_classification import comp_object_tagging_classification
@@ -39,8 +39,11 @@ def _prefetch_all_governance_queries(progress_bar=None, status_text=None):
         return
     total = len(needed)
     completed = 0
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        futures = {pool.submit(_run_query_thread, session, k, sql): k for k, sql in needed.items()}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_run_query_thread, session, k, sql): k
+            for k, sql in needed.items()
+        }
         for future in as_completed(futures):
             key, df, err = future.result()
             st.session_state[key] = df
@@ -55,12 +58,10 @@ def _prefetch_all_governance_queries(progress_bar=None, status_text=None):
         status_text.empty()
 
 
-def _render_kpi_tiles(total_tables, tagged_tables, active_policies):
-    pct = round(tagged_tables / total_tables * 100, 1) if total_tables > 0 else 0.0
+def _render_kpi_tiles(total_tables, tagged_tables):
+    untagged = total_tables - tagged_tables
+    pct = round(tagged_tables / total_tables * 100, 2) if total_tables > 0 else 0.0
     pct_color = "#0077B6" if pct >= 70 else "#E8A229" if pct >= 40 else "#E74C3C"
-    low_coverage_html = ""
-    if pct < 40:
-        low_coverage_html = '<div style="font-size: 12px; color: #E8A229; font-weight: 600; margin-top: 4px;">⚠ Low coverage</div>'
     st.markdown(f"""
     <div style="display: flex; gap: 16px; padding: 10px 0;">
         <div style="flex: 1; text-align: left; padding: 18px; background: #f0f7fb; border-radius: 12px;">
@@ -71,14 +72,13 @@ def _render_kpi_tiles(total_tables, tagged_tables, active_policies):
             <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tagged Tables</div>
             <div style="font-size: 36px; font-weight: 700; color: #11567F; line-height: 1;">{tagged_tables:,}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: #fff3cd; border-radius: 12px;">
-            <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tag Coverage</div>
-            <div style="font-size: 36px; font-weight: 700; color: {pct_color}; line-height: 1;">{pct:.1f}%</div>
-            {low_coverage_html}
+        <div style="flex: 1; text-align: left; padding: 18px; background: #FDEDEC; border-radius: 12px;">
+            <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Untagged Tables</div>
+            <div style="font-size: 36px; font-weight: 700; color: #E74C3C; line-height: 1;">{untagged:,}</div>
         </div>
-        <div style="flex: 1; text-align: left; padding: 18px; background: #f0f7fb; border-radius: 12px;">
-            <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Active Policies</div>
-            <div style="font-size: 36px; font-weight: 700; color: #003D73; line-height: 1;">{active_policies:,}</div>
+        <div style="flex: 1; text-align: left; padding: 18px; background: #fff3cd; border-radius: 12px;">
+            <div style="font-size: 13px; color: #666; font-weight: 500; margin-bottom: 6px;">Tag Coverage %</div>
+            <div style="font-size: 36px; font-weight: 700; color: {pct_color}; line-height: 1;">{pct:.1f}%</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -94,6 +94,7 @@ def _render_governance_health_score():
 
     total = int(df["TOTAL_TABLES"].sum())
     tagged = int(df["TAGGED_TABLES"].sum())
+    _render_kpi_tiles(total, tagged)
 
     col1, col2 = st.columns(2)
     palette = CHART_SERIES + CHART_EXTENDED
@@ -198,78 +199,16 @@ def _render_sensitivity_heatmap():
 
 
 def _render_overview_content():
-    health_df = st.session_state.get("dg_health_score_data", pd.DataFrame())
-    tag_df = st.session_state.get("dg_classification_data", pd.DataFrame())
-    policy_df = st.session_state.get("dg_policy_inventory_data", pd.DataFrame())
+    st.markdown("### Governance Overview")
 
-    total_tables = int(health_df["TOTAL_TABLES"].sum()) if not health_df.empty else 0
-    tagged_tables = int(health_df["TAGGED_TABLES"].sum()) if not health_df.empty else 0
-    active_policies = int(policy_df["ACTIVE_COUNT"].sum()) if not policy_df.empty else 0
+    with st.expander("Governance Health Score", expanded=True):
+        _render_governance_health_score()
 
-    _render_kpi_tiles(total_tables, tagged_tables, active_policies)
+    with st.expander("Sensitivity Heatmap", expanded=True):
+        _render_sensitivity_heatmap()
 
-    st.divider()
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("Classification Source Breakdown")
-        if not tag_df.empty:
-            tag_df = tag_df.copy()
-            tag_df["DISPLAY_METHOD"] = tag_df["APPLY_METHOD"].apply(
-                lambda m: "UNKNOWN" if str(m).upper() in ("NULL", "NONE", "") else str(m).upper()
-            )
-            grouped = tag_df.groupby("DISPLAY_METHOD", as_index=False)["TOTAL_TAGS"].sum()
-            grouped = grouped[grouped["TOTAL_TAGS"] > 0]
-            if not grouped.empty:
-                colors = [BRAND_SECONDARY, BRAND_ACCENT]
-                fig = go.Figure(data=[go.Pie(
-                    labels=grouped["DISPLAY_METHOD"].tolist(),
-                    values=grouped["TOTAL_TAGS"].astype(int).tolist(),
-                    hole=0.45,
-                    marker=dict(colors=[colors[i % len(colors)] for i in range(len(grouped))]),
-                    textinfo="label+percent",
-                    hovertemplate="<b>%{label}</b><br>Tags: %{value:,}<br>%{percent}<extra></extra>",
-                )])
-                fig.update_layout(
-                    title="Tag Application Method",
-                    height=380,
-                    margin=dict(t=50, b=20, l=20, r=20),
-                    showlegend=True,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No classification data available.")
-        else:
-            st.info("No classification data available.")
-
-    with col2:
-        st.subheader("Active Policy Inventory")
-        if not policy_df.empty:
-            active = policy_df[policy_df["ACTIVE_COUNT"] > 0].copy()
-            if not active.empty:
-                colors = [BRAND_SECONDARY, BRAND_PRIMARY_DARK]
-                fig = go.Figure(data=[go.Bar(
-                    x=active["POLICY_KIND"].tolist(),
-                    y=active["ACTIVE_COUNT"].astype(int).tolist(),
-                    marker_color=[colors[i % len(colors)] for i in range(len(active))],
-                    text=active["ACTIVE_COUNT"].astype(int).tolist(),
-                    textposition="outside",
-                    hovertemplate="<b>%{x}</b><br>Count: %{y:,}<extra></extra>",
-                )])
-                fig.update_layout(
-                    title="Active Policies by Kind",
-                    yaxis_title="Count",
-                    height=380,
-                    margin=dict(t=50, b=80, l=40, r=20),
-                    showlegend=False,
-                    xaxis_tickangle=-15,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No active policies found.")
-        else:
-            st.info("No policy inventory data available.")
+    with st.expander("Policy Inventory", expanded=True):
+        _render_policy_inventory()
 
 
 def comp_governance_overview(entry_actions=None):
@@ -294,7 +233,7 @@ def comp_governance_overview(entry_actions=None):
             "Overview",
             "Object Tagging & Classification",
             "Data Privacy & Protection",
-            "Data Lineage & Quality (Lite)"
+            "Lineage & Quality"
         ]
         sub_tabs = st.tabs(sub_tab_names)
 

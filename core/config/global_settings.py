@@ -2,9 +2,11 @@ import os
 
 
 def get_project_root():
-    current_path = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(current_path, os.pardir, os.pardir))
-    return project_root
+    try:
+        current_path = os.path.dirname(os.path.abspath(__file__))
+        return os.path.abspath(os.path.join(current_path, os.pardir, os.pardir))
+    except (TypeError, ValueError):
+        return os.getcwd()
 
 
 # App settings

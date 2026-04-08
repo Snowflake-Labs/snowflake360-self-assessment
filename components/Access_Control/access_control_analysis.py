@@ -249,7 +249,7 @@ def comp_access_control_analysis(entry_actions=None):
         entity_cache = "ac_entity_list"
         if entity_cache not in st.session_state:
             try:
-                rows = session.sql("SELECT DISTINCT NAME AS ROLE_NAME FROM SNOWFLAKE.ACCOUNT_USAGE.ROLES WHERE DELETED_ON IS NULL ORDER BY NAME").collect()
+                rows = session.sql("SELECT NAME AS ROLE_NAME FROM SNOWFLAKE.ACCOUNT_USAGE.ROLES WHERE DELETED_ON IS NULL ORDER BY NAME").collect()
                 st.session_state[entity_cache] = [r[0] for r in rows] if rows else []
             except Exception:
                 st.session_state[entity_cache] = []

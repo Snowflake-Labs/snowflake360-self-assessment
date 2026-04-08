@@ -7,7 +7,6 @@ recommendations via SNOWFLAKE.CORTEX.AI_COMPLETE().
 import streamlit as st
 import json
 from core.config.design_tokens import BRAND_PRIMARY, TEXT_HEADING
-from components.Database_Management.db_overview import _query_cache as _db_cache
 
 
 def _call_cortex(session, model_name, prompt):
@@ -190,10 +189,6 @@ def _gather_individual_data(session, database_name):
 
 
 def comp_db_management_analyzer(entry_actions=None):
-    if not _db_cache:
-        st.info("Please wait while Database Management overview loads. Switch to the overview tab to begin loading.")
-        return
-
     st.markdown("### Database Management Analyzer")
     st.markdown("AI-powered analysis of your database storage, table lifecycle, and clustering patterns.")
 

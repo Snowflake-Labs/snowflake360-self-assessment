@@ -3,13 +3,11 @@ from .ingestion_analysis import comp_ingestion_analyzer
 from .highest_cost import comp_highest_cost
 from .bulk_load_analysis import comp_bulk_load_analysis
 from .snowpipe_analysis import comp_snowpipe_analysis
-from .ingestion_summary import comp_ingestion_summary
 
 __all__ = [
     'comp_ingestion_overview',
     'comp_ingestion_analyzer',
     'comp_highest_cost',
     'comp_bulk_load_analysis',
-    'comp_snowpipe_analysis',
-    'comp_ingestion_summary',
+    'comp_snowpipe_analysis'
 ]

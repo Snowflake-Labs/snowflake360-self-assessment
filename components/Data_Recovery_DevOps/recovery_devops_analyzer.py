@@ -252,7 +252,7 @@ def comp_recovery_devops_analyzer(entry_actions=None):
 
         selected = st.selectbox("Task / Dynamic Table", entities, key="rd_entity_select")
 
-        if st.button("Analyze", key="rd_indiv_btn"):
+        if st.button("Analyze", key="rd_indiv_btn", type="secondary"):
             indiv_key = f"rd_indiv_{selected}"
             _prog = st.progress(0)
             _stat = st.empty()

@@ -4,6 +4,45 @@
 
 ---
 
+## First-time deployment (new account)
+
+### Prerequisites
+- [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation) installed
+- A configured connection with ACCOUNTADMIN (or a role with CREATE WAREHOUSE / CREATE DATABASE privileges)
+
+### Steps
+
+```bash
+git clone <repo-url>
+cd s360_self_assessment
+
+# Deploy with defaults (creates DEMOS db, S360_SELF_ASSESS schema, S360_WH warehouse)
+./scripts/deploy.sh --connection <connection_name>
+
+# Or with custom targets:
+./scripts/deploy.sh --connection <connection_name> \
+    --database  MY_DB     \
+    --schema    MY_SCHEMA \
+    --warehouse MY_WH
+```
+
+The script does three things:
+1. **`scripts/setup.sql`** — creates the warehouse, database, schema, and grants `IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE` (required for `ACCOUNT_USAGE` views)
+2. **`snowflake.yml`** — generated from `snowflake.yml.template` with your target values
+3. **`snow streamlit deploy --replace`** — uploads all app files and creates the Streamlit object
+
+### Re-deploying (code updates only)
+
+```bash
+# Skip infra setup — just patch snowflake.yml and redeploy
+./scripts/deploy.sh --connection <connection_name> --skip-setup
+
+# Also remove stale stage files after deleting a component:
+./scripts/deploy.sh --connection <connection_name> --skip-setup --prune
+```
+
+---
+
 ## Project structure
 
 ```

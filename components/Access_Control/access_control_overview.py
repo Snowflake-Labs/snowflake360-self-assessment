@@ -23,8 +23,11 @@ def _prefetch_all_ac_queries(progress_bar=None, status_text=None):
         return
     total = len(needed)
     completed = 0
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        futures = {pool.submit(_run_query_thread, session, k, sql): k for k, sql in needed.items()}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_run_query_thread, session, k, sql): k
+            for k, sql in needed.items()
+        }
         for future in as_completed(futures):
             key, df, err = future.result()
             st.session_state[key] = df

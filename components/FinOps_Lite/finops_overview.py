@@ -6,18 +6,6 @@ from .finops_control import comp_finops_control
 from .finops_optimization import comp_finops_optimization
 from ._all_finops_queries import _ALL_FINOPS_QUERIES
 
-CREDIT_PRICE = 3.0
-STORAGE_PRICE = 23.0
-
-
-def _get_credit_price():
-    ci = st.session_state.get("customer_info", {})
-    if isinstance(ci, dict):
-        p = ci.get("credit_price")
-        if p and float(p) > 0:
-            return float(p)
-    return CREDIT_PRICE
-
 
 def _run_query_thread(session, key, sql):
     try:
@@ -30,21 +18,16 @@ def _prefetch_all_finops_queries(progress_bar=None, status_text=None):
     session = st.session_state.get("session")
     if not session:
         return
-    cp = _get_credit_price()
-    sp = STORAGE_PRICE
     needed = {k: sql for k, sql in _ALL_FINOPS_QUERIES.items() if k not in st.session_state}
     if not needed:
         return
     total = len(needed)
     completed = 0
-    def _run(s, k, q):
-        resolved = q.replace("{credit_price}", str(cp)).replace("{storage_price}", str(sp))
-        try:
-            return k, s.sql(resolved).to_pandas(), None
-        except Exception as e:
-            return k, pd.DataFrame(), e
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        futures = {pool.submit(_run, session, k, sql): k for k, sql in needed.items()}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_run_query_thread, session, k, sql): k
+            for k, sql in needed.items()
+        }
         for future in as_completed(futures):
             key, df, err = future.result()
             st.session_state[key] = df
@@ -73,7 +56,7 @@ def comp_finops_overview(entry_actions=None):
         tab_visibility, tab_control, tab_optimization = st.tabs([
             "Visibility",
             "Control",
-            "Optimization"
+            "Optimisation"
         ])
 
         with tab_visibility:
@@ -87,5 +70,5 @@ def comp_finops_overview(entry_actions=None):
 
     except Exception as e:
         st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'Component Error: {str(e)}'
+                    f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)
