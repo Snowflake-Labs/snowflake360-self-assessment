@@ -334,43 +334,38 @@ def _render_clustering_subtab():
 
         st.divider()
         st.subheader("Automatic Clustering Cost Detail")
-        cost_df = _cached_query(session, "db_overview_16_credit_query",
-                                ALL_DB_OVERVIEW_QUERIES["db_overview_16_credit_query"])
-        if len(cost_df) > 0:
-            col_credits, col_tables = st.columns(2)
-            with col_credits:
-                fig_cr = go.Figure(go.Bar(
-                    x=cost_df["Table Type"],
-                    y=cost_df["Clustering Credits (30 Days)"],
-                    marker_color=[CHART_SERIES[i % len(CHART_SERIES)] for i in range(len(cost_df))],
-                    text=[f"{v:.2f}" for v in cost_df["Clustering Credits (30 Days)"]],
-                    textposition="outside",
-                    hovertemplate="<b>%{x}</b><br>Credits: %{y:.2f}<extra></extra>",
-                ))
-                fig_cr.update_layout(
-                    title="Clustering Credits by Table Type (30 Days)",
-                    xaxis_title="Table Type", yaxis_title="Credits",
-                    height=350, margin=dict(t=50, b=60, l=40, r=20),
-                    showlegend=False,
-                )
-                st.plotly_chart(fig_cr, use_container_width=True)
-            with col_tables:
-                fig_tc = go.Figure(go.Bar(
-                    x=cost_df["Table Type"],
-                    y=cost_df["Distinct Tables Clustered"],
-                    marker_color=[CHART_SERIES[i % len(CHART_SERIES)] for i in range(len(cost_df))],
-                    text=cost_df["Distinct Tables Clustered"].astype(int).astype(str),
-                    textposition="outside",
-                    hovertemplate="<b>%{x}</b><br>Tables: %{y}<extra></extra>",
-                ))
-                fig_tc.update_layout(
-                    title="Distinct Tables Clustered by Type (30 Days)",
-                    xaxis_title="Table Type", yaxis_title="Table Count",
-                    height=350, margin=dict(t=50, b=60, l=40, r=20),
-                    showlegend=False,
-                )
-                st.plotly_chart(fig_tc, use_container_width=True)
-            st.dataframe(cost_df, use_container_width=True)
+        detail_df = _cached_query(session, "db_overview_23_clustering_detail_query",
+                                  ALL_DB_OVERVIEW_QUERIES["db_overview_23_clustering_detail_query"])
+        if len(detail_df) > 0 and detail_df["CLUSTERING_CREDITS"].sum() > 0:
+            chart_df = detail_df[detail_df["CLUSTERING_CREDITS"] > 0].head(15).sort_values("CLUSTERING_CREDITS", ascending=True)
+            fig = go.Figure(go.Bar(
+                x=chart_df["CLUSTERING_CREDITS"].tolist(),
+                y=chart_df["TABLE_NAME"].tolist(),
+                orientation="h",
+                marker_color=PRIMARY,
+                text=[f"{v:.4f}" for v in chart_df["CLUSTERING_CREDITS"].tolist()],
+                textposition="outside",
+                hovertemplate="<b>%{y}</b><br>Credits: %{x:.4f}<extra></extra>",
+            ))
+            fig.update_layout(
+                title="Top Tables by Clustering Credits",
+                xaxis_title="Credits",
+                yaxis_title="",
+                height=max(350, len(chart_df) * 28),
+                margin=dict(l=10, r=80, t=50, b=30),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            show_cols = [c for c in ["TABLE_NAME", "IS_CLUSTERED", "CLUSTERING_KEY", "AUTO_CLUSTERING_ON",
+                                     "CLUSTERING_CREDITS", "AVG_CREDITS_PER_DAY", "ACTIVE_DAYS"] if c in detail_df.columns]
+            st.dataframe(detail_df[show_cols].rename(columns={
+                "TABLE_NAME": "Table",
+                "IS_CLUSTERED": "Clustered",
+                "CLUSTERING_KEY": "Clustering Key",
+                "AUTO_CLUSTERING_ON": "Auto Clustering",
+                "CLUSTERING_CREDITS": "Credits",
+                "AVG_CREDITS_PER_DAY": "Avg Credits/Day",
+                "ACTIVE_DAYS": "Active Days",
+            }), use_container_width=True)
         else:
             st.info("No automatic clustering cost data found for the last 30 days.")
 
@@ -451,6 +446,62 @@ def _render_low_lifespan_subtab():
                 [ALERT, PRIMARY],
                 title="Short-Lived by Table Type"
             )
+
+        st.divider()
+        st.subheader("Short-Lived Tables by Schema")
+        schema_df = _cached_query(session, "db_overview_24_short_lived_by_schema_query",
+                                   ALL_DB_OVERVIEW_QUERIES["db_overview_24_short_lived_by_schema_query"])
+        if len(schema_df) > 0:
+            col_bar, col_pie = st.columns(2)
+            with col_bar:
+                chart_df = schema_df.head(15).sort_values("SHORT_LIVED_COUNT", ascending=True)
+                max_perm = chart_df["PERMANENT_COUNT"].max() if chart_df["PERMANENT_COUNT"].max() > 0 else 1
+                bar_colors = [
+                    f"rgba({int(17 + (41 - 17) * v / max_perm)},{int(86 + (181 - 86) * v / max_perm)},{int(127 + (232 - 127) * v / max_perm)},0.9)"
+                    for v in chart_df["PERMANENT_COUNT"].tolist()
+                ]
+                fig_bar = go.Figure(go.Bar(
+                    x=chart_df["SHORT_LIVED_COUNT"].tolist(),
+                    y=chart_df["SCHEMA_NAME"].tolist(),
+                    orientation="h",
+                    marker_color=bar_colors,
+                    customdata=chart_df["PERMANENT_COUNT"].tolist(),
+                    hovertemplate="<b>%{y}</b><br>Short-Lived: %{x}<br>Permanent: %{customdata}<extra></extra>",
+                ))
+                fig_bar.update_layout(
+                    title="Short-Lived Tables by Schema (top 15)",
+                    xaxis_title="Count",
+                    height=max(350, len(chart_df) * 28),
+                    margin=dict(l=10, r=10, t=50, b=30),
+                    coloraxis_colorbar=dict(title="PERMANENT_COUNT"),
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
+            with col_pie:
+                rec_counts = schema_df["RECOMMENDATION"].value_counts()
+                fig_pie = go.Figure(go.Pie(
+                    labels=rec_counts.index.tolist(),
+                    values=rec_counts.values.tolist(),
+                    hole=0.4,
+                    marker_colors=[ALERT if "⚠️" in lbl else PRIMARY for lbl in rec_counts.index.tolist()],
+                    texttemplate="%{percent:.0%}",
+                    textposition="inside",
+                ))
+                fig_pie.update_layout(
+                    title="Recommendation Distribution",
+                    height=380,
+                    margin=dict(l=10, r=10, t=50, b=30),
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+            st.dataframe(schema_df.rename(columns={
+                "SCHEMA_NAME": "Schema",
+                "SHORT_LIVED_COUNT": "Short-Lived",
+                "PERMANENT_COUNT": "Permanent (Issue)",
+                "TRANSIENT_COUNT": "Transient (OK)",
+                "AVG_LIFESPAN_MINUTES": "Avg Lifespan (min)",
+                "RECOMMENDATION": "Recommendation",
+            }), use_container_width=True)
+        else:
+            st.info("No short-lived table schema data found in the last 30 days.")
 
         st.divider()
         st.subheader("Short-Lived Table Details (Last 30 Days, <24h Lifespan)")
@@ -637,31 +688,64 @@ def comp_db_high_churn(entry_actions=None):
 
 
 def _render_potential_savings():
+    st.markdown("### Potential Storage Savings Summary")
     st.markdown(
-        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
-        'ℹ️&nbsp;&nbsp;<b>Potential Savings:</b> Estimated storage savings from Time Travel and Fail-Safe '
-        'optimisation — reducing retention on low-value tables and cleaning up stale clones.</div>',
-        unsafe_allow_html=True)
+        "Estimated monthly savings from converting high-churn tables to TRANSIENT or reducing "
+        "Time Travel retention. Based on **$23.00/TB/month** standard storage rate.",
+        unsafe_allow_html=False)
     try:
-        df = st.session_state.get("db_overview_22_potential_savings_query", pd.DataFrame())
-        if df.empty:
+        session = st.session_state.session
+        df = _cached_query(session, "db_overview_25_savings_actions_query",
+                           ALL_DB_OVERVIEW_QUERIES["db_overview_25_savings_actions_query"])
+        if df.empty or len(df) == 0:
             st.info("No significant savings opportunities detected.")
             return
-        for c in ['ACTIVE_TB', 'TIME_TRAVEL_TB', 'FAILSAFE_TB', 'CLONE_RETAINED_TB', 'POTENTIAL_SAVINGS_TB']:
-            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-        total_savings = df['POTENTIAL_SAVINGS_TB'].sum()
-        st.metric("Total Potential Savings", f"{total_savings:,.4f} TB")
-        import plotly.graph_objects as go
-        fig = go.Figure()
-        fig.add_trace(go.Bar(name='Time Travel', x=df['DATABASE_NAME'], y=df['TIME_TRAVEL_TB'], marker_color='#29B5E8'))
-        fig.add_trace(go.Bar(name='Fail-Safe', x=df['DATABASE_NAME'], y=df['FAILSAFE_TB'], marker_color='#11567F'))
-        fig.add_trace(go.Bar(name='Clone Retained', x=df['DATABASE_NAME'], y=df['CLONE_RETAINED_TB'], marker_color='#E8A229'))
-        fig.update_layout(
-            barmode='stack', title='Potential Storage Savings by Database',
-            yaxis_title='TB', height=400, margin=dict(t=50, b=100),
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(df[['DATABASE_NAME', 'TABLE_COUNT', 'ACTIVE_TB', 'TIME_TRAVEL_TB', 'FAILSAFE_TB', 'CLONE_RETAINED_TB', 'POTENTIAL_SAVINGS_TB']])
+        for c in ["AFFECTED_TABLES", "POTENTIAL_SAVINGS_TB", "EST_MONTHLY_SAVINGS_USD"]:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+
+        transient_row = df[df["OPTIMIZATION_ACTION"].str.contains("TRANSIENT", case=False, na=False)]
+        tt_row = df[df["OPTIMIZATION_ACTION"].str.contains("TIME_TRAVEL", case=False, na=False)]
+
+        transient_savings = transient_row["EST_MONTHLY_SAVINGS_USD"].values[0] if len(transient_row) else 0
+        transient_tables = transient_row["AFFECTED_TABLES"].values[0] if len(transient_row) else 0
+        tt_savings = tt_row["EST_MONTHLY_SAVINGS_USD"].values[0] if len(tt_row) else 0
+        tt_tables = tt_row["AFFECTED_TABLES"].values[0] if len(tt_row) else 0
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Convert high-churn tables to TRANSIENT", f"${int(transient_savings):,}/mo")
+        c2.metric("Tables Affected", f"{int(transient_tables):,}")
+        c3.metric("Reduce TIME_TRAVEL retention on high-...", f"${int(tt_savings):,}/mo")
+        c4.metric("Tables Affected", f"{int(tt_tables):,}")
+
+        col_chart, col_table = st.columns(2)
+        with col_chart:
+            fig = go.Figure(go.Bar(
+                x=df["OPTIMIZATION_ACTION"].tolist(),
+                y=df["EST_MONTHLY_SAVINGS_USD"].tolist(),
+                marker_color=[PRIMARY, ALERT],
+                text=[f"${int(v):,}" for v in df["EST_MONTHLY_SAVINGS_USD"].tolist()],
+                textposition="outside",
+                hovertemplate="<b>%{x}</b><br>$%{y:,.0f}/mo<extra></extra>",
+            ))
+            fig.update_layout(
+                title="Estimated Monthly Savings (USD)",
+                yaxis_title="USD / month",
+                height=380,
+                margin=dict(l=10, r=20, t=50, b=120),
+                xaxis=dict(tickangle=-30),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with col_table:
+            st.dataframe(df.rename(columns={
+                "OPTIMIZATION_ACTION": "Action",
+                "AFFECTED_TABLES": "Tables",
+                "POTENTIAL_SAVINGS_TB": "Savings (TB)",
+                "EST_MONTHLY_SAVINGS_USD": "Est. Monthly Savings (USD)",
+            })[["Action", "Tables", "Savings (TB)", "Est. Monthly Savings (USD)"]],
+            use_container_width=True)
     except Exception as e:
-        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">'
+            f'🛑&nbsp;&nbsp;Error: {str(e)}</div>',
+            unsafe_allow_html=True)

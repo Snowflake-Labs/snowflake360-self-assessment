@@ -427,4 +427,89 @@ AND (sm.time_travel_bytes + sm.failsafe_bytes) > 0
         LIMIT 15
     """,
 
+    "db_overview_23_clustering_detail_query": """
+        WITH clustering_cost AS (
+            SELECT
+                table_id,
+                SUM(credits_used) AS credits_last_period,
+                COUNT(DISTINCT DATE_TRUNC('day', start_time)) AS active_days
+            FROM SNOWFLAKE.ACCOUNT_USAGE.AUTOMATIC_CLUSTERING_HISTORY
+            WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+            GROUP BY 1
+        )
+        SELECT
+            t.table_catalog || '.' || t.table_schema || '.' || t.table_name AS table_name,
+            CASE WHEN t.clustering_key IS NOT NULL THEN 'YES' ELSE 'NO' END AS is_clustered,
+            t.clustering_key,
+            t.auto_clustering_on,
+            COALESCE(cc.credits_last_period, 0) AS clustering_credits,
+            ROUND(DIV0(cc.credits_last_period, cc.active_days), 2) AS avg_credits_per_day,
+            COALESCE(cc.active_days, 0) AS active_days
+        FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES t
+        LEFT JOIN clustering_cost cc ON t.table_id = cc.table_id
+        WHERE t.deleted IS NULL
+          AND (t.clustering_key IS NOT NULL OR cc.credits_last_period > 0)
+          AND t.table_schema != 'INFORMATION_SCHEMA'
+        ORDER BY clustering_credits DESC
+        LIMIT 50
+    """,
+
+    "db_overview_24_short_lived_by_schema_query": """
+        SELECT
+            table_schema AS schema_name,
+            COUNT(*) AS short_lived_count,
+            SUM(CASE WHEN is_transient = 'NO' THEN 1 ELSE 0 END) AS permanent_count,
+            SUM(CASE WHEN is_transient = 'YES' THEN 1 ELSE 0 END) AS transient_count,
+            ROUND(AVG(TIMEDIFF('minute', created, deleted)), 0) AS avg_lifespan_minutes,
+            CASE
+                WHEN SUM(CASE WHEN is_transient = 'NO' THEN 1 ELSE 0 END) > 10
+                THEN '⚠️ Many permanent short-lived – review ETL'
+                ELSE '✅ OK'
+            END AS recommendation
+        FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+        WHERE deleted IS NOT NULL
+          AND created >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+          AND TIMEDIFF('hour', created, deleted) < 24
+          AND table_type = 'BASE TABLE'
+        GROUP BY table_schema
+        ORDER BY permanent_count DESC
+        LIMIT 20
+    """,
+
+    "db_overview_25_savings_actions_query": """
+        WITH savings_analysis AS (
+            SELECT
+                t.is_transient,
+                sm.active_bytes,
+                sm.time_travel_bytes,
+                sm.failsafe_bytes,
+                CASE
+                    WHEN t.is_transient = 'NO' AND sm.failsafe_bytes > sm.active_bytes * 2
+                    THEN sm.failsafe_bytes
+                    ELSE 0
+                END AS potential_failsafe_savings_bytes,
+                CASE
+                    WHEN sm.time_travel_bytes > sm.active_bytes * 2
+                    THEN sm.time_travel_bytes * 0.5
+                    ELSE 0
+                END AS potential_tt_savings_bytes
+            FROM SNOWFLAKE.ACCOUNT_USAGE.TABLE_STORAGE_METRICS sm
+            JOIN SNOWFLAKE.ACCOUNT_USAGE.TABLES t ON sm.id = t.table_id
+            WHERE sm.deleted = FALSE
+        )
+        SELECT
+            'Convert high-churn tables to TRANSIENT' AS optimization_action,
+            COUNT(CASE WHEN potential_failsafe_savings_bytes > 0 THEN 1 END) AS affected_tables,
+            ROUND(SUM(potential_failsafe_savings_bytes) / POWER(1024, 4), 4) AS potential_savings_tb,
+            ROUND(SUM(potential_failsafe_savings_bytes) / POWER(1024, 4) * 23.0, 0) AS est_monthly_savings_usd
+        FROM savings_analysis
+        UNION ALL
+        SELECT
+            'Reduce TIME_TRAVEL retention on high-churn tables',
+            COUNT(CASE WHEN potential_tt_savings_bytes > 0 THEN 1 END),
+            ROUND(SUM(potential_tt_savings_bytes) / POWER(1024, 4), 4),
+            ROUND(SUM(potential_tt_savings_bytes) / POWER(1024, 4) * 23.0, 0)
+        FROM savings_analysis
+    """,
+
 }
