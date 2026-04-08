@@ -83,7 +83,7 @@ def _render_oversizing():
 
     with col2:
         cols_show = [c for c in ['WAREHOUSE_NAME', 'WAREHOUSE_SIZE', 'TOTAL_QUERIES', 'OVERSIZED_QUERIES', 'PCT_OVERSIZED', 'SEVERITY'] if c in df.columns]
-        st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+        st.dataframe(df[cols_show], use_container_width=True)
 
 
 def _render_idle_time():
@@ -131,7 +131,7 @@ def _render_idle_time():
     with col2:
         cols_show = [c for c in ['WAREHOUSE_NAME', 'EST_UPTIME_HOURS', 'EST_IDLE_HOURS', 'PCT_TIME_IDLE'] if c in df.columns]
         st.dataframe(df[cols_show].sort_values('PCT_TIME_IDLE', ascending=False) if 'PCT_TIME_IDLE' in df.columns else df[cols_show],
-                     use_container_width=True, hide_index=True)
+                     use_container_width=True)
 
 
 def _render_scaling_efficiency():
@@ -195,4 +195,4 @@ def _render_scaling_efficiency():
     st.plotly_chart(fig, use_container_width=True)
 
     cols_show = [c for c in ['WAREHOUSE_NAME', 'WAREHOUSE_SIZE', 'NODE_COUNT', 'CREDITS_PER_HOUR', 'TOTAL_QUERIES', 'PCT_OVERSIZED_FOR_DATA', 'PCT_IDLE_TIME', 'OVERALL_RECOMMENDATION'] if c in df.columns]
-    st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+    st.dataframe(df[cols_show], use_container_width=True)

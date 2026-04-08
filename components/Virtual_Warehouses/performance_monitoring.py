@@ -122,7 +122,7 @@ def _render_data_skew():
     st.plotly_chart(fig, use_container_width=True)
 
     cols_show = [c for c in ['WAREHOUSE_NAME', 'QUERY_COUNT', 'TOTAL_REMOTE_SPILL_GB', 'TOTAL_LOCAL_SPILL_GB', 'TOTAL_SPILL_GB', 'WORST_SEVERITY'] if c in df.columns]
-    st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+    st.dataframe(df[cols_show], use_container_width=True)
 
 
 def _render_load_distribution():
@@ -168,7 +168,7 @@ def _render_load_distribution():
     st.plotly_chart(fig, use_container_width=True)
 
     cols_show = [c for c in ['WAREHOUSE_NAME', 'ROLE_NAME', 'USER_NAME', 'QUERY_COUNT', 'TOTAL_EXECUTION_HOURS', 'PCT_OF_TOTAL_QUERIES', 'PCT_OF_TOTAL_RUNTIME'] if c in df.columns]
-    st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+    st.dataframe(df[cols_show], use_container_width=True)
 
 
 def _render_poor_pruning():
@@ -182,7 +182,7 @@ def _render_poor_pruning():
     df['DURATION_SEC'] = pd.to_numeric(df['DURATION_SEC'], errors='coerce').fillna(0)
 
     cols_show = [c for c in ['WAREHOUSE_NAME', 'USER_NAME', 'PCT_TABLE_SCANNED', 'SCANNED_GB', 'SCAN_TYPE', 'QUERY_PREVIEW'] if c in df.columns]
-    st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+    st.dataframe(df[cols_show], use_container_width=True)
 
     st.markdown("**Partition Pruning Quality (size = query duration)**")
     scan_col = 'SCAN_TYPE' if 'SCAN_TYPE' in df.columns else None
@@ -261,4 +261,4 @@ def _render_activity_summary():
     st.plotly_chart(fig, use_container_width=True)
 
     cols_show = [c for c in ['WAREHOUSE_NAME', 'ACTIVE_HOURS', 'TOTAL_QUERIES', 'QUERIES_PER_ACTIVE_HOUR', 'TOTAL_EXECUTION_HOURS'] if c in df.columns]
-    st.dataframe(df[cols_show], use_container_width=True, hide_index=True)
+    st.dataframe(df[cols_show], use_container_width=True)
