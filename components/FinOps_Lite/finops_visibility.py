@@ -1,629 +1,439 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from core.config.design_tokens import (
-    BRAND_PRIMARY, BRAND_SECONDARY,
-    CHART_SERIES, CHART_EXTENDED,
-)
 
-CREDIT_COST = 3.0
-COST_PER_TB = 23.0
+_C1 = '#29B5E8'
+_C2 = '#11567F'
+_C3 = '#75C2D8'
+_CA = '#E8A229'
+
+CREDIT_PRICE = 3.0
+STORAGE_PRICE = 23.0
 
 
-def _run_query(sql):
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
     session = st.session_state.get("session")
     if not session:
         return pd.DataFrame()
     try:
-        return session.sql(sql).to_pandas()
-    except Exception as e:
-        st.warning(f"Query error: {e}")
-        return pd.DataFrame()
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
 
 
-_EXEC_FORECAST_SQL = f"""
-WITH compute_cost AS (
-    SELECT
-        'Compute & Services' AS category,
-        SUM(CREDITS_USED_COMPUTE + CREDITS_USED_CLOUD_SERVICES) AS units,
-        SUM(CREDITS_USED_COMPUTE + CREDITS_USED_CLOUD_SERVICES) * {CREDIT_COST} AS cost_last_30d
-    FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY
-    WHERE USAGE_DATE >= DATEADD('day', -30, CURRENT_DATE())
-),
-storage_cost AS (
-    SELECT
-        'Storage' AS category,
-        AVG(storage_bytes + stage_bytes + failsafe_bytes) / POW(1024, 4) AS units_tb,
-        (AVG(storage_bytes + stage_bytes + failsafe_bytes) / POW(1024, 4)) * {COST_PER_TB} AS cost_last_30d
-    FROM SNOWFLAKE.ACCOUNT_USAGE.STORAGE_USAGE
-    WHERE usage_date >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-),
-transfer_cost AS (
-    SELECT
-        'Data Transfer' AS category,
-        SUM(bytes_transferred) / POW(1024, 3) AS units_gb,
-        0 AS cost_last_30d
-    FROM SNOWFLAKE.ACCOUNT_USAGE.DATA_TRANSFER_HISTORY
-    WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-),
-unioned AS (
-    SELECT * FROM compute_cost
-    UNION ALL SELECT * FROM storage_cost
-    UNION ALL SELECT * FROM transfer_cost
-)
-SELECT
-    category AS "Category",
-    ROUND(cost_last_30d, 2) AS "Actual Cost (Last 30 Days)",
-    ROUND(cost_last_30d, 2) AS "Forecast (Next 1 Month)",
-    ROUND(cost_last_30d * 3, 2) AS "Forecast (Next 3 Months)",
-    ROUND(cost_last_30d * 6, 2) AS "Forecast (Next 6 Months)",
-    ROUND(cost_last_30d * 12, 2) AS "EAC (Estimated Annual)"
-FROM unioned
-"""
-
-_COMPUTE_BREAKDOWN_SQL = f"""
-WITH resource_metrics AS (
-    SELECT 'WAREHOUSE_METERING' AS service_type, WAREHOUSE_NAME AS resource_name,
-           SUM(CREDITS_USED) AS credits_last_30d
-    FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
-    WHERE START_TIME >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-    GROUP BY 1, 2
-    UNION ALL
-    SELECT SERVICE_TYPE, SERVICE_TYPE AS resource_name,
-           SUM(CREDITS_USED) AS credits_last_30d
-    FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY
-    WHERE USAGE_DATE >= DATEADD('day', -30, CURRENT_DATE())
-      AND SERVICE_TYPE NOT IN ('WAREHOUSE_METERING', 'WAREHOUSE_METERING_READER')
-    GROUP BY 1, 2
-),
-final_calc AS (
-    SELECT service_type, resource_name,
-           ROUND(credits_last_30d, 1) AS credits_last_30d,
-           ROUND(credits_last_30d * {CREDIT_COST}, 2) AS cost_last_30d,
-           ROUND((credits_last_30d * {CREDIT_COST}) * 12, 0) AS estimated_annual_cost
-    FROM resource_metrics
-)
-SELECT
-    service_type AS "Service Type",
-    resource_name AS "Resource Name",
-    credits_last_30d AS "Credits (Last 30 Days)",
-    cost_last_30d AS "Cost (Last 30 Days)",
-    estimated_annual_cost AS "Estimated Annual Cost",
-    ROUND(RATIO_TO_REPORT(cost_last_30d) OVER () * 100, 2) AS "% of Total"
-FROM final_calc
-WHERE cost_last_30d > 0
-ORDER BY cost_last_30d DESC
-LIMIT 20
-"""
-
-_COSTLIEST_QUERIES_SQL = f"""
-WITH query_costs AS (
-    SELECT query_id, user_name, warehouse_name,
-           credits_attributed_compute,
-           credits_attributed_compute * {CREDIT_COST} AS query_cost_usd
-    FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_ATTRIBUTION_HISTORY
-    WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-)
-SELECT
-    ROUND(qc.query_cost_usd, 4) AS "Query Cost ($)",
-    qc.user_name AS "User",
-    qc.warehouse_name AS "Warehouse",
-    qc.query_id AS "Query ID",
-    LEFT(qh.query_text, 100) AS "Query Preview"
-FROM query_costs qc
-JOIN SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY qh ON qc.query_id = qh.query_id
-ORDER BY qc.query_cost_usd DESC
-LIMIT 20
-"""
-
-_STORAGE_COSTS_SQL = f"""
-SELECT
-    usage_date AS "Usage Date",
-    database_name AS "Database",
-    ROUND(AVG(average_database_bytes) / POW(1024, 3), 2) AS "Avg GB",
-    ROUND(AVG(average_database_bytes) / POW(1024, 4), 4) AS "Avg TB",
-    ROUND((AVG(average_database_bytes) / POW(1024, 4)) * {COST_PER_TB}, 2) AS "Daily Cost ($)",
-    ROUND(((AVG(average_database_bytes) / POW(1024, 4)) * {COST_PER_TB}) * 30, 2) AS "Est Monthly Cost ($)"
-FROM SNOWFLAKE.ACCOUNT_USAGE.DATABASE_STORAGE_USAGE_HISTORY
-WHERE usage_date >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-GROUP BY ALL
-QUALIFY ROW_NUMBER() OVER (PARTITION BY database_name ORDER BY usage_date DESC) = 1
-ORDER BY "Daily Cost ($)" DESC
-"""
-
-_DATA_TRANSFER_SQL = """
-SELECT
-    target_cloud AS "Target Cloud",
-    transfer_type AS "Transfer Type",
-    ROUND(SUM(bytes_transferred) / POW(1024, 3), 2) AS "GB Transferred"
-FROM SNOWFLAKE.ACCOUNT_USAGE.DATA_TRANSFER_HISTORY
-WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-GROUP BY ALL
-ORDER BY "GB Transferred" DESC
-"""
-
-_DAILY_COST_TREND_SQL = f"""
-SELECT
-    mdh.usage_date AS "Date",
-    ROUND(SUM(mdh.credits_used_compute), 2) AS "Compute Credits",
-    ROUND(SUM(mdh.credits_used_cloud_services), 2) AS "Cloud Services Credits",
-    ROUND(SUM(mdh.credits_used_compute + mdh.credits_used_cloud_services), 2) AS "Total Credits",
-    ROUND(SUM(mdh.credits_used_compute + mdh.credits_used_cloud_services) * {CREDIT_COST}, 2) AS "Total Cost ($)",
-    ROUND(AVG(SUM(mdh.credits_used_compute + mdh.credits_used_cloud_services) * {CREDIT_COST}) OVER (
-        ORDER BY mdh.usage_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-    ), 2) AS "7-Day Rolling Avg ($)"
-FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY mdh
-WHERE mdh.usage_date >= DATEADD('day', -30, CURRENT_DATE())
-GROUP BY mdh.usage_date
-ORDER BY mdh.usage_date ASC
-"""
-
-_SERVICE_TYPE_BREAKDOWN_SQL = f"""
-SELECT
-    mdh.service_type AS "Service Type",
-    ROUND(SUM(mdh.credits_used), 2) AS "Total Credits",
-    ROUND(SUM(mdh.credits_used) * {CREDIT_COST}, 2) AS "Total Cost ($)",
-    ROUND(SUM(mdh.credits_used) * {CREDIT_COST} * 12, 0) AS "Est Annual Cost ($)",
-    ROUND(RATIO_TO_REPORT(SUM(mdh.credits_used)) OVER () * 100, 2) AS "% of Total"
-FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY mdh
-WHERE mdh.usage_date >= DATEADD('day', -30, CURRENT_DATE())
-GROUP BY mdh.service_type
-ORDER BY "Total Cost ($)" DESC
-"""
-
-_ANOMALIES_SQL = f"""
-SELECT
-    date AS "Anomaly Date",
-    ROUND(actual_value, 2) AS "Actual Credits",
-    ROUND(forecasted_value, 2) AS "Expected Credits",
-    ROUND(actual_value * {CREDIT_COST}, 2) AS "Actual Cost ($)",
-    ROUND(forecasted_value * {CREDIT_COST}, 2) AS "Expected Cost ($)",
-    ROUND((actual_value - forecasted_value) * {CREDIT_COST}, 2) AS "Overspend ($)",
-    ROUND(((actual_value - forecasted_value) / NULLIF(forecasted_value, 0)) * 100, 1) AS "Deviation %"
-FROM SNOWFLAKE.ACCOUNT_USAGE.ANOMALIES_DAILY
-WHERE date >= DATEADD('day', -60, CURRENT_TIMESTAMP())
-  AND is_anomaly = TRUE
-ORDER BY date DESC
-"""
-
-_ALL_VISIBILITY_QUERIES = {
-    "finops_exec_forecast": _EXEC_FORECAST_SQL,
-    "finops_compute_breakdown": _COMPUTE_BREAKDOWN_SQL,
-    "finops_costliest_queries": _COSTLIEST_QUERIES_SQL,
-    "finops_storage_costs": _STORAGE_COSTS_SQL,
-    "finops_data_transfer": _DATA_TRANSFER_SQL,
-    "finops_anomalies": _ANOMALIES_SQL,
-    "fv_daily_cost_trend": _DAILY_COST_TREND_SQL,
-    "fv_service_type_breakdown": _SERVICE_TYPE_BREAKDOWN_SQL,
-}
-
-
-def _run_query_thread(session, key, sql):
-    try:
-        return key, session.sql(sql).to_pandas(), None
-    except Exception as e:
-        return key, pd.DataFrame(), e
-
-
-def _prefetch_all_visibility_queries():
-    session = st.session_state.get("session")
-    if not session:
-        return
-    needed = {k: sql for k, sql in _ALL_VISIBILITY_QUERIES.items() if k not in st.session_state}
-    if not needed:
-        return
-    for k, sql in needed.items():
-        key, df, err = _run_query_thread(session, k, sql)
-        st.session_state[key] = df
+def _get_credit_price():
+    ci = st.session_state.get("customer_info", {})
+    if isinstance(ci, dict):
+        p = ci.get("credit_price")
+        if p and float(p) > 0:
+            return float(p)
+    return CREDIT_PRICE
 
 
 def comp_finops_visibility(entry_actions=None):
     try:
-        _prefetch_all_visibility_queries()
-        st.markdown("### Visibility")
-
+        cp = _get_credit_price()
+        _render_top_metrics(cp)
+        _render_eac_overview(cp)
         with st.expander("The Executive Forecast (Account Level)", expanded=True):
-            _render_executive_forecast()
-
-        with st.expander("Compute Breakdown (By Feature & Warehouse)", expanded=True):
-            _render_compute_breakdown()
-
+            _render_executive_forecast(cp)
+        with st.expander("Compute Spend by Service & Warehouse", expanded=True):
+            _render_compute_breakdown(cp)
         with st.expander("Top 20 Costliest Queries (With User Attribution)", expanded=True):
-            _render_costliest_queries()
-
+            _render_costliest_queries(cp)
         with st.expander("Storage Costs (By Database)", expanded=True):
-            _render_storage_costs_by_database()
-
-        with st.expander("Data Transfer Costs", expanded=True):
-            _render_data_transfer_costs()
-
-        with st.expander("Daily Cost Trend (30 Days)", expanded=True):
-            _render_daily_cost_trend()
-
-        with st.expander("Cost by Service Type", expanded=True):
-            _render_service_type_breakdown()
-
-        with st.expander("Cost Anomalies (Automated Detection)", expanded=True):
-            _render_cost_anomalies()
-
+            _render_storage_costs(cp)
+        with st.expander("Monthly Warehouse Credit Trend (Last 12 Months)", expanded=True):
+            _render_monthly_wh_credits()
+        with st.expander("Daily Cost Trend (30 Days) with 7-Day Moving Average", expanded=True):
+            _render_daily_cost_trend(cp)
+        with st.expander("Query Cost Attribution (By User)", expanded=True):
+            _render_user_cost_attribution(cp)
+        with st.expander("Data Transfer Volume (30 Days)", expanded=True):
+            _render_data_transfer()
+        with st.expander("Service Type Cost Breakdown", expanded=True):
+            _render_service_type_breakdown(cp)
+        _render_wh_eac_heatmap(cp)
     except Exception as e:
-        st.markdown(
-            f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-            f'Component Error: {str(e)}'
-            f'</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                    f'Component Error: {str(e)}'
+                    f'</div>', unsafe_allow_html=True)
 
 
-def _render_executive_forecast():
-    st.markdown("#### The Executive Forecast (Account Level)")
-    st.markdown(f"**Cost breakdown and forecast by category** (compute, storage, data transfer) showing last 30 days actual spend and projected costs based on current consumption rates. Using ${CREDIT_COST}/credit, ${COST_PER_TB}/TB/month.")
+def _render_top_metrics(cp):
+    df = _cached_sql("fv_exec_forecast", st.session_state.get("fv_exec_forecast_sql", "SELECT 1 WHERE FALSE"))
+    if "fv_exec_forecast" in st.session_state:
+        df = st.session_state["fv_exec_forecast"]
+    if df.empty:
+        return
+    compute_cost = 0
+    cs_cost = 0
+    storage_cost = 0
+    for _, row in df.iterrows():
+        cat = str(row.get("CATEGORY", ""))
+        val = float(row.get("ACTUAL_COST_30D", 0) or 0)
+        if "Compute" in cat and "Cloud" not in cat:
+            compute_cost = val
+        elif "Cloud" in cat:
+            cs_cost = val
+        elif "Storage" in cat:
+            storage_cost = val
+    total_cost = compute_cost + cs_cost + storage_cost
+    eac = total_cost * 12
 
-    cache_key = "finops_exec_forecast"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_EXEC_FORECAST_SQL)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Compute Cost (30d)", f"${compute_cost:,.0f}")
+    c2.metric("Cloud Services Cost (30d)", f"${cs_cost:,.0f}")
+    c3.metric("Storage Cost (30d)", f"${storage_cost:,.0f}")
+    c4.metric("Total Cost (30d)", f"${total_cost:,.0f}")
+    c5.metric("EAC (Annual Est.)", f"${eac:,.0f}")
 
-    df = st.session_state[cache_key]
+
+def _render_eac_overview(cp):
+    df = st.session_state.get("fv_exec_forecast", pd.DataFrame())
+    if df.empty:
+        return
+
+    compute_cost = 0
+    cs_cost = 0
+    storage_cost = 0
+    for _, row in df.iterrows():
+        cat = str(row.get("CATEGORY", ""))
+        val = float(row.get("ACTUAL_COST_30D", 0) or 0)
+        if "Compute" in cat and "Cloud" not in cat:
+            compute_cost = val
+        elif "Cloud" in cat:
+            cs_cost = val
+        elif "Storage" in cat:
+            storage_cost = val
+    total_30d = compute_cost + cs_cost + storage_cost
+    eac = total_30d * 12
+
+    col_chart, col_table = st.columns(2)
+    with col_chart:
+        st.markdown("**EAC Overview**")
+        cats = ["Compute", "Cloud Services", "Storage", "30-Day Total", "Annual EAC"]
+        vals = [compute_cost, cs_cost, storage_cost, total_30d, eac]
+        colors = [_C1, _C2, _C3, _C1, _CA]
+        fig = go.Figure(data=[go.Bar(
+            x=cats, y=vals, marker_color=colors,
+            text=[f"${v:,.0f}" for v in vals], textposition="outside",
+        )])
+        fig.update_layout(height=350, margin=dict(t=10, b=40, l=50, r=10), yaxis_title="Cost ($)", showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_table:
+        st.markdown("**EAC Components**")
+        tbl = pd.DataFrame({
+            "CATEGORY": ["Compute", "Cloud Services", "Storage", "30-Day Total", "Annual EAC"],
+            "VALUE": [f"${compute_cost:,.2f}", f"${cs_cost:,.2f}", f"${storage_cost:,.2f}", f"${total_30d:,.2f}", f"${eac:,.2f}"]
+        })
+        st.dataframe(tbl, use_container_width=True)
+
+
+def _render_executive_forecast(cp):
+    df = st.session_state.get("fv_exec_forecast", pd.DataFrame())
     if df.empty:
         st.info("No cost data available.")
         return
 
     st.dataframe(df, use_container_width=True)
+    st.markdown("---")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("##### Cost Distribution (Last 30 Days)")
-        cats = df["Category"].tolist()
-        costs = df["Actual Cost (Last 30 Days)"].tolist()
-        palette = ["#29B5E8", "#E8A229", "#0077B6"]
-        fig = go.Figure(data=[go.Bar(
-            x=cats, y=costs,
-            marker_color=palette[:len(cats)],
-            text=[f"${v:,.2f}" for v in costs],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>$%{y:,.2f}<extra></extra>",
-        )])
-        fig.update_layout(height=350, margin=dict(t=10, b=40, l=50, r=50), xaxis_title="Category", yaxis_title="Cost ($)", showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("**Cost Distribution (Last 30 Days)**")
+        cats = df["CATEGORY"].tolist()
+        costs = [float(v or 0) for v in df["ACTUAL_COST_30D"].tolist()]
+        valid = [(c, v) for c, v in zip(cats, costs) if v > 0]
+        if valid:
+            labels, values = zip(*valid)
+            colors = [_C1, _C2, _C3, _CA][:len(values)]
+            fig = go.Figure(data=[go.Pie(
+                labels=list(labels), values=list(values), hole=0.45,
+                marker=dict(colors=colors),
+                textinfo="label+percent",
+            )])
+            fig.update_layout(height=350, margin=dict(t=10, b=10, l=10, r=10), showlegend=True,
+                              legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center"))
+            st.plotly_chart(fig, use_container_width=True)
 
     with col2:
-        st.markdown("##### Forecast Comparison")
+        st.markdown("**Forecast Comparison by Category**")
         fig2 = go.Figure()
-        periods = [
-            ("Actual Cost (Last 30 Days)", "#29B5E8"),
-            ("Forecast (Next 3 Months)", "#0077B6"),
-            ("EAC (Estimated Annual)", "#11567F"),
-        ]
-        for col_name, color in periods:
-            if col_name in df.columns:
-                fig2.add_trace(go.Bar(
-                    name=col_name.replace("Forecast ", "").replace("(", "").replace(")", ""),
-                    x=cats, y=df[col_name].tolist(),
-                    marker_color=color,
-                    hovertemplate="<b>%{x}</b><br>$%{y:,.2f}<extra></extra>",
-                ))
-        fig2.update_layout(barmode="group", height=350, margin=dict(t=10, b=80, l=50, r=50), legend=dict(orientation="h", y=-0.3, x=0.5, xanchor="center", font=dict(size=9)))
+        period_cols = ["ACTUAL_COST_30D", "FORECAST_1M", "FORECAST_3M", "FORECAST_6M", "EAC_ANNUAL"]
+        period_labels = ["30d", "1M", "3M", "6M", "EAC"]
+        cat_colors = [_C1, _C2, _C3, _CA]
+        for i, (_, row) in enumerate(df.iterrows()):
+            cat = row["CATEGORY"]
+            vals = [float(row.get(c, 0) or 0) for c in period_cols]
+            fig2.add_trace(go.Bar(
+                name=cat, x=period_labels, y=vals,
+                marker_color=cat_colors[i % len(cat_colors)],
+            ))
+        fig2.update_layout(barmode="group", height=350, margin=dict(t=10, b=40, l=50, r=10),
+                           legend=dict(orientation="h", y=-0.2, x=0.5, xanchor="center", font=dict(size=9)))
         st.plotly_chart(fig2, use_container_width=True)
 
 
-def _render_compute_breakdown():
-    st.markdown("#### Compute Breakdown (By Feature & Warehouse)")
-    st.markdown(f"**Top 20 resources by cost over last 30 days** at ${CREDIT_COST}/credit.")
-
-    cache_key = "finops_compute_breakdown"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_COMPUTE_BREAKDOWN_SQL)
-
-    df = st.session_state[cache_key]
+def _render_compute_breakdown(cp):
+    df = st.session_state.get("fv_compute_breakdown", pd.DataFrame())
     if df.empty:
         st.info("No compute breakdown data available.")
         return
 
-    st.dataframe(df, use_container_width=True)
-
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("##### Cost by Service Type")
-        svc = df.groupby("Service Type")["Cost (Last 30 Days)"].sum().reset_index().sort_values("Cost (Last 30 Days)", ascending=False)
+        st.markdown("**Top Compute Resources by Cost (30d)**")
+        top = df.head(15).sort_values("COST_LAST_30D", ascending=True)
         fig = go.Figure(data=[go.Bar(
-            x=svc["Service Type"].tolist(), y=svc["Cost (Last 30 Days)"].tolist(),
-            marker_color=BRAND_SECONDARY,
-            text=[f"${v:,.2f}" for v in svc["Cost (Last 30 Days)"].tolist()],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>$%{y:,.2f}<extra></extra>",
+            y=top["RESOURCE_NAME"].tolist(), x=top["COST_LAST_30D"].tolist(),
+            orientation="h", marker_color=_C1,
         )])
-        fig.update_layout(height=350, margin=dict(t=10, b=80, l=50, r=50), xaxis=dict(tickangle=45), showlegend=False)
+        fig.update_layout(height=400, margin=dict(t=10, b=40, l=200, r=10), xaxis_title="COST_LAST_30D", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
-        st.markdown("##### Top 10 Resources by Cost")
-        top = df.head(10)
-        fig2 = go.Figure(data=[go.Bar(
-            y=top["Resource Name"].tolist()[::-1],
-            x=top["Cost (Last 30 Days)"].tolist()[::-1],
-            orientation="h", marker_color="#E8A229",
-            text=[f"${v:,.2f}" for v in top["Cost (Last 30 Days)"].tolist()[::-1]],
-            textposition="outside",
-            hovertemplate="<b>%{y}</b><br>$%{x:,.2f}<extra></extra>",
+        st.markdown("**Compute Resource Mix**")
+        svc = df.groupby("SERVICE_TYPE")["CREDITS_LAST_30D"].sum().reset_index()
+        fig2 = go.Figure(data=[go.Pie(
+            labels=svc["SERVICE_TYPE"].tolist(), values=svc["CREDITS_LAST_30D"].tolist(),
+            hole=0.45, marker=dict(colors=[_C1, _C2, _C3, _CA][:len(svc)]),
+            textinfo="label+percent",
         )])
-        fig2.update_layout(height=350, margin=dict(t=10, b=40, l=150, r=50), showlegend=False)
+        fig2.update_layout(height=400, margin=dict(t=10, b=10, l=10, r=10))
         st.plotly_chart(fig2, use_container_width=True)
 
+    st.dataframe(df, use_container_width=True)
 
-def _render_costliest_queries():
-    st.markdown("#### Top 20 Costliest Queries")
-    st.markdown(f"**Most expensive individual queries over last 30 days** at ${CREDIT_COST}/credit.")
 
-    cache_key = "finops_costliest_queries"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_COSTLIEST_QUERIES_SQL)
-
-    df = st.session_state[cache_key]
+def _render_costliest_queries(cp):
+    df = st.session_state.get("fv_costliest_queries", pd.DataFrame())
     if df.empty:
         st.info("No query attribution data available.")
         return
 
+    st.markdown("**Top 20 Queries by Attributed Compute Cost**")
+    top = df.head(20).sort_values("QUERY_COST_USD", ascending=True)
+    fig = go.Figure(data=[go.Bar(
+        y=top["QUERY_ID"].astype(str).tolist(), x=top["QUERY_COST_USD"].tolist(),
+        orientation="h", marker_color=_C1,
+    )])
+    fig.update_layout(height=500, margin=dict(t=10, b=40, l=250, r=10), xaxis_title="QUERY_COST_USD", showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
     st.dataframe(df, use_container_width=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("##### Cost by User (Top 10)")
-        user_df = df.groupby("User")["Query Cost ($)"].sum().reset_index().sort_values("Query Cost ($)", ascending=False).head(10)
-        fig = go.Figure(data=[go.Bar(
-            y=user_df["User"].tolist()[::-1], x=user_df["Query Cost ($)"].tolist()[::-1],
-            orientation="h", marker_color="#0077B6",
-            text=[f"${v:,.2f}" for v in user_df["Query Cost ($)"].tolist()[::-1]],
-            textposition="outside",
-            hovertemplate="<b>%{y}</b><br>$%{x:,.2f}<extra></extra>",
-        )])
-        fig.update_layout(height=350, margin=dict(t=10, b=40, l=120, r=50), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
 
-    with col2:
-        st.markdown("##### Cost by Warehouse (Top 10)")
-        wh_df = df.groupby("Warehouse")["Query Cost ($)"].sum().reset_index().sort_values("Query Cost ($)", ascending=False).head(10)
-        fig2 = go.Figure(data=[go.Bar(
-            y=wh_df["Warehouse"].tolist()[::-1], x=wh_df["Query Cost ($)"].tolist()[::-1],
-            orientation="h", marker_color="#E8A229",
-            text=[f"${v:,.2f}" for v in wh_df["Query Cost ($)"].tolist()[::-1]],
-            textposition="outside",
-            hovertemplate="<b>%{y}</b><br>$%{x:,.2f}<extra></extra>",
-        )])
-        fig2.update_layout(height=350, margin=dict(t=10, b=40, l=120, r=50), showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
-
-
-def _render_storage_costs_by_database():
-    st.markdown("#### Storage Costs (By Database)")
-    st.markdown(f"**Latest daily database storage costs** at ${COST_PER_TB}/TB/month.")
-
-    cache_key = "finops_storage_costs"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_STORAGE_COSTS_SQL)
-
-    df = st.session_state[cache_key]
+def _render_storage_costs(cp):
+    df = st.session_state.get("fv_storage_costs", pd.DataFrame())
     if df.empty:
         st.info("No storage cost data available.")
         return
 
-    st.dataframe(df, use_container_width=True)
-
     col1, col2 = st.columns(2)
+    top = df.head(15).sort_values("EST_MONTHLY_COST", ascending=True)
     with col1:
-        st.markdown("##### Daily Storage Cost (Top 10)")
-        top = df.head(10)
+        st.markdown("**Estimated Monthly Storage Cost by Database**")
         fig = go.Figure(data=[go.Bar(
-            y=top["Database"].tolist()[::-1], x=top["Daily Cost ($)"].tolist()[::-1],
-            orientation="h", marker_color="#0077B6",
-            text=[f"${v:,.2f}" for v in top["Daily Cost ($)"].tolist()[::-1]],
-            textposition="outside",
-            hovertemplate="<b>%{y}</b><br>$%{x:,.2f}<extra></extra>",
+            y=top["DATABASE_NAME"].tolist(), x=top["EST_MONTHLY_COST"].tolist(),
+            orientation="h", marker_color=_C1,
         )])
-        fig.update_layout(height=350, margin=dict(t=10, b=40, l=150, r=50), showlegend=False)
+        fig.update_layout(height=400, margin=dict(t=10, b=40, l=250, r=10), xaxis_title="EST_MONTHLY_COST", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
+    top2 = df.head(15).sort_values("AVG_TB", ascending=True)
     with col2:
-        st.markdown("##### Est Monthly Cost (Top 10)")
-        top = df.head(10)
+        st.markdown("**Average Storage by Database (TB)**")
         fig2 = go.Figure(data=[go.Bar(
-            y=top["Database"].tolist()[::-1], x=top["Est Monthly Cost ($)"].tolist()[::-1],
-            orientation="h", marker_color="#00B4D8",
-            text=[f"${v:,.2f}" for v in top["Est Monthly Cost ($)"].tolist()[::-1]],
-            textposition="outside",
-            hovertemplate="<b>%{y}</b><br>$%{x:,.2f}<extra></extra>",
+            y=top2["DATABASE_NAME"].tolist(), x=top2["AVG_TB"].tolist(),
+            orientation="h", marker_color=_CA,
         )])
-        fig2.update_layout(height=350, margin=dict(t=10, b=40, l=150, r=50), showlegend=False)
+        fig2.update_layout(height=400, margin=dict(t=10, b=40, l=250, r=10), xaxis_title="AVG_TB", showlegend=False)
         st.plotly_chart(fig2, use_container_width=True)
 
+    st.dataframe(df, use_container_width=True)
 
-def _render_data_transfer_costs():
-    st.markdown("#### Data Transfer Costs")
-    st.markdown("**Data transfer volume summary** by target cloud and transfer type over last 30 days.")
 
-    cache_key = "finops_data_transfer"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_DATA_TRANSFER_SQL)
-
-    df = st.session_state[cache_key]
+def _render_monthly_wh_credits():
+    df = st.session_state.get("fv_monthly_wh_credits", pd.DataFrame())
     if df.empty:
-        st.info("No data transfer history found in the last 30 days.")
+        st.info("No monthly warehouse credit data available.")
         return
 
-    st.dataframe(df, use_container_width=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("##### By Target Cloud")
-        cloud_df = df.groupby("Target Cloud")["GB Transferred"].sum().reset_index().sort_values("GB Transferred", ascending=False)
-        fig = go.Figure(data=[go.Bar(
-            x=cloud_df["Target Cloud"].tolist(), y=cloud_df["GB Transferred"].tolist(),
-            marker_color=BRAND_SECONDARY,
-            text=[f"{v:,.2f} GB" for v in cloud_df["GB Transferred"].tolist()],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>%{y:,.2f} GB<extra></extra>",
-        )])
-        fig.update_layout(height=350, margin=dict(t=10, b=80, l=50, r=50), xaxis=dict(tickangle=45), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-        st.markdown("##### By Transfer Type")
-        type_df = df.groupby("Transfer Type")["GB Transferred"].sum().reset_index().sort_values("GB Transferred", ascending=False)
-        fig2 = go.Figure(data=[go.Bar(
-            x=type_df["Transfer Type"].tolist(), y=type_df["GB Transferred"].tolist(),
-            marker_color="#E8A229",
-            text=[f"{v:,.2f} GB" for v in type_df["GB Transferred"].tolist()],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>%{y:,.2f} GB<extra></extra>",
-        )])
-        fig2.update_layout(height=350, margin=dict(t=10, b=80, l=50, r=50), xaxis=dict(tickangle=45), showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
+    st.markdown("**Monthly Warehouse Credits (Last 12 Months)**")
+    months = [str(m)[:10] for m in df["MONTH"].tolist()]
+    fig = go.Figure(data=[go.Scatter(
+        x=months, y=df["MONTHLY_CREDITS"].tolist(),
+        mode="lines+markers", line=dict(color=_C1, width=2),
+        marker=dict(size=6),
+    )])
+    fig.update_layout(height=350, margin=dict(t=10, b=60, l=50, r=10),
+                      xaxis_title="MONTH", yaxis_title="MONTHLY_CREDITS")
+    st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_daily_cost_trend():
-    st.markdown("#### Daily Cost Trend (30 Days)")
-    st.markdown(f"**Daily aggregated credit cost** over last 30 days with rolling 7-day average at ${CREDIT_COST}/credit.")
-
-    cache_key = "fv_daily_cost_trend"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_DAILY_COST_TREND_SQL)
-
-    df = st.session_state[cache_key]
+def _render_daily_cost_trend(cp):
+    df = st.session_state.get("fv_daily_cost_trend", pd.DataFrame())
     if df.empty:
         st.info("No daily cost data available.")
         return
 
-    st.dataframe(df, use_container_width=True)
+    st.markdown("Daily compute + cloud services cost with 7-day rolling average to smooth noise.")
+    st.markdown("**Daily Cost with 7-Day Moving Average**")
 
-    dates = [str(d)[:10] for d in df["Date"].tolist()]
+    dates = [str(d)[:10] for d in df["USAGE_DATE"].tolist()]
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=dates, y=df["Total Cost ($)"].tolist(),
-        name="Daily Cost",
-        marker_color="#29B5E8",
-        hovertemplate="<b>%{x}</b><br>$%{y:,.2f}<extra></extra>",
+        x=dates, y=df["TOTAL_COST_USD"].tolist(),
+        name="Daily Cost ($)", marker_color=_C3,
     ))
-    fig.add_trace(go.Scatter(
-        x=dates, y=df["7-Day Rolling Avg ($)"].tolist(),
-        name="7-Day Rolling Avg",
-        mode="lines",
-        line=dict(color="#E8A229", width=3, dash="dash"),
-        hovertemplate="<b>%{x}</b><br>Avg: $%{y:,.2f}<extra></extra>",
-    ))
-    fig.update_layout(
-        height=400,
-        margin=dict(t=10, b=80, l=50, r=50),
-        xaxis=dict(tickangle=45, title="Date"),
-        yaxis=dict(title="Cost ($)"),
-        legend=dict(orientation="h", y=-0.25, x=0.5, xanchor="center"),
-    )
+    if "ROLLING_7D_AVG_COST" in df.columns:
+        fig.add_trace(go.Scatter(
+            x=dates, y=df["ROLLING_7D_AVG_COST"].tolist(),
+            name="7-Day MA ($)", mode="lines",
+            line=dict(color=_C2, width=2),
+        ))
+    fig.update_layout(height=400, margin=dict(t=10, b=80, l=50, r=10),
+                      xaxis=dict(tickangle=45), yaxis_title="Cost (USD estimate)",
+                      legend=dict(orientation="h", y=1.02, x=0, xanchor="left"))
     st.plotly_chart(fig, use_container_width=True)
 
-    col1, col2, col3 = st.columns(3)
-    total_cost = df["Total Cost ($)"].sum()
-    avg_daily = df["Total Cost ($)"].mean()
-    max_day = df.loc[df["Total Cost ($)"].idxmax()]
+    st.dataframe(df, use_container_width=True)
+
+
+def _render_user_cost_attribution(cp):
+    df = st.session_state.get("fv_user_cost_attribution", pd.DataFrame())
+    if df.empty:
+        st.info("No user cost attribution data available.")
+        return
+
+    st.markdown("Attributed compute cost by user over the last 30 days.")
+
+    col1, col2 = st.columns(2)
+    top5 = df.head(5).sort_values("TOTAL_COST_USD", ascending=True)
     with col1:
-        st.metric("Total 30-Day Cost", f"${total_cost:,.2f}")
+        st.markdown("**Top 10 Users by Attributed Cost**")
+        top10 = df.head(10).sort_values("TOTAL_COST_USD", ascending=True)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            y=top10["USER_NAME"].tolist(), x=top10["TOTAL_COST_USD"].tolist(),
+            orientation="h", marker_color=_C1, name="TOTAL_COST_USD",
+            text=[f"${v:,.2f}" for v in top10["TOTAL_COST_USD"].tolist()], textposition="outside",
+        ))
+        fig.update_layout(height=350, margin=dict(t=10, b=40, l=250, r=80), xaxis_title="Cost (USD)", showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+
     with col2:
-        st.metric("Avg Daily Cost", f"${avg_daily:,.2f}")
-    with col3:
-        st.metric("Peak Day", f"${max_day['Total Cost ($)']:,.2f}", delta=str(max_day['Date'])[:10])
+        st.markdown("**Top 10 Users by Query Volume**")
+        top10q = df.head(10).sort_values("QUERY_COUNT", ascending=True)
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(
+            y=top10q["USER_NAME"].tolist(), x=top10q["QUERY_COUNT"].tolist(),
+            orientation="h", marker_color=_C2, name="QUERY_COUNT",
+            text=[f"{v:,.0f}" for v in top10q["QUERY_COUNT"].tolist()], textposition="outside",
+        ))
+        fig2.update_layout(height=350, margin=dict(t=10, b=40, l=250, r=80), xaxis_title="Queries", showlegend=False)
+        st.plotly_chart(fig2, use_container_width=True)
+
+    st.dataframe(df, use_container_width=True)
 
 
-def _render_service_type_breakdown():
-    st.markdown("#### Cost by Service Type")
-    st.markdown(f"**Aggregated cost by Snowflake service type** over last 30 days at ${CREDIT_COST}/credit.")
+def _render_data_transfer():
+    df = st.session_state.get("fv_data_transfer", pd.DataFrame())
+    if df.empty:
+        st.markdown("Egress data transfer by region \u2014 transfers out of Snowflake's cloud region may incur cost.")
+        st.info("No data transfer records found.")
+        return
 
-    cache_key = "fv_service_type_breakdown"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_SERVICE_TYPE_BREAKDOWN_SQL)
+    st.dataframe(df, use_container_width=True)
 
-    df = st.session_state[cache_key]
+
+def _render_service_type_breakdown(cp):
+    df = st.session_state.get("fv_service_type_breakdown", pd.DataFrame())
     if df.empty:
         st.info("No service type data available.")
         return
 
-    st.dataframe(df, use_container_width=True)
-
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("##### Cost Distribution by Service Type")
-        colors = CHART_EXTENDED[:len(df)] if len(df) <= len(CHART_EXTENDED) else CHART_SERIES[:len(df)]
-        fig = go.Figure(data=[go.Pie(
-            labels=df["Service Type"].tolist(),
-            values=df["Total Cost ($)"].tolist(),
-            marker=dict(colors=colors),
-            textinfo="label+percent",
-            hovertemplate="<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>",
+        st.markdown("**Cost by Snowflake Service Type**")
+        sdf = df.sort_values("TOTAL_COST_USD", ascending=True)
+        fig = go.Figure(data=[go.Bar(
+            y=sdf["SERVICE_TYPE"].tolist(), x=sdf["TOTAL_COST_USD"].tolist(),
+            orientation="h", marker_color=_C1,
         )])
-        fig.update_layout(height=400, margin=dict(t=10, b=10, l=10, r=10), showlegend=True,
-                          legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center", font=dict(size=9)))
+        fig.update_layout(height=350, margin=dict(t=10, b=40, l=200, r=10), xaxis_title="TOTAL_COST_USD", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
-        st.markdown("##### Cost by Service Type (Bar)")
-        fig2 = go.Figure(data=[go.Bar(
-            y=df["Service Type"].tolist()[::-1],
-            x=df["Total Cost ($)"].tolist()[::-1],
-            orientation="h", marker_color="#29B5E8",
-            text=[f"${v:,.2f}" for v in df["Total Cost ($)"].tolist()[::-1]],
-            textposition="outside",
-            hovertemplate="<b>%{y}</b><br>$%{x:,.2f}<extra></extra>",
-        )])
-        fig2.update_layout(height=400, margin=dict(t=10, b=40, l=200, r=50), showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
+        st.markdown("**Service Cost Tier Distribution**")
+        if "COST_TIER" in df.columns:
+            tier = df.groupby("COST_TIER")["TOTAL_COST_USD"].sum().reset_index()
+            fig2 = go.Figure(data=[go.Pie(
+                labels=tier["COST_TIER"].tolist(), values=tier["TOTAL_COST_USD"].tolist(),
+                hole=0.45, marker=dict(colors=[_C1, _C2, _C3][:len(tier)]),
+                textinfo="label+percent",
+            )])
+            fig2.update_layout(height=350, margin=dict(t=10, b=10, l=10, r=10))
+            st.plotly_chart(fig2, use_container_width=True)
+
+    st.dataframe(df, use_container_width=True)
 
 
-def _render_cost_anomalies():
-    st.markdown("#### Cost Anomalies (Automated Detection)")
-    st.markdown(f"**Daily cost anomalies over last 60 days** showing actual vs expected credits at ${CREDIT_COST}/credit.")
+def _render_wh_eac_heatmap(cp):
+    st.markdown("### Top 30 Warehouse 12-Month EAC Forecast")
+    st.markdown(f"Warehouse forecast heatmap using the selected customer's credit price from Customer Info. "
+                f"Low projected spend is shaded toward cyan and high projected spend toward orange.")
 
-    cache_key = "finops_anomalies"
-    if cache_key not in st.session_state:
-        st.session_state[cache_key] = _run_query(_ANOMALIES_SQL)
-
-    df = st.session_state[cache_key]
+    df = st.session_state.get("fv_wh_eac_heatmap", pd.DataFrame())
     if df.empty:
-        st.markdown(
-            '<div style="background-color: #EAF8F0; border-left: 6px solid #27AE60; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-            'No cost anomalies detected in the last 60 days.</div>',
-            unsafe_allow_html=True)
+        st.info("No warehouse EAC heatmap data available.")
         return
 
-    st.dataframe(df, use_container_width=True)
+    display_df = df.copy()
+    month_cols = [c for c in display_df.columns if c.startswith("M") and c[1:].isdigit()]
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("##### Overspend by Date (Top 10)")
-        top = df.sort_values("Overspend ($)", ascending=False).head(10)
-        dates = [str(d)[:10] for d in top["Anomaly Date"].tolist()]
-        vals = top["Overspend ($)"].tolist()
-        fig = go.Figure(data=[go.Bar(
-            x=dates, y=vals,
-            marker_color=["#E8A229" if v > 0 else "#29B5E8" for v in vals],
-            text=[f"${v:,.2f}" for v in vals],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>$%{y:,.2f}<extra></extra>",
-        )])
-        fig.update_layout(height=350, margin=dict(t=10, b=80, l=50, r=50), xaxis=dict(tickangle=45), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+    def _fmt_usd(val):
+        try:
+            return f"${float(val):,.0f}"
+        except (ValueError, TypeError):
+            return val
 
-    with col2:
-        st.markdown("##### Deviation % Distribution")
-        dev = df.copy()
-        dev["Bucket"] = pd.cut(
-            dev["Deviation %"],
-            bins=[-float("inf"), 0, 25, 50, 100, float("inf")],
-            labels=["< 0%", "0-25%", "25-50%", "50-100%", "> 100%"]
-        )
-        buckets = dev["Bucket"].value_counts().reset_index()
-        buckets.columns = ["Bucket", "Count"]
-        colors = ["#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#11567F"]
-        fig2 = go.Figure(data=[go.Bar(
-            x=buckets["Bucket"].astype(str).tolist(),
-            y=buckets["Count"].tolist(),
-            marker_color=colors[:len(buckets)],
-            text=buckets["Count"].tolist(),
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>Count: %{y}<extra></extra>",
-        )])
-        fig2.update_layout(height=350, margin=dict(t=10, b=80, l=50, r=50), xaxis=dict(tickangle=45), showlegend=False)
-        st.plotly_chart(fig2, use_container_width=True)
+    for c in month_cols:
+        display_df[c] = display_df[c].apply(_fmt_usd)
+
+    rename = {f"M{i}": str(i) for i in range(1, 13)}
+    display_df = display_df.rename(columns=rename)
+
+    num_cols = [str(i) for i in range(1, 13)]
+
+    def _color_cell(val):
+        try:
+            num = float(str(val).replace("$", "").replace(",", ""))
+        except (ValueError, TypeError):
+            return ""
+        all_vals = []
+        for c in month_cols:
+            for v in df[c].tolist():
+                try:
+                    all_vals.append(float(v))
+                except (ValueError, TypeError):
+                    pass
+        if not all_vals:
+            return ""
+        mn, mx = min(all_vals), max(all_vals)
+        if mx == mn:
+            return "background-color: rgba(41,181,232,0.3)"
+        ratio = (num - mn) / (mx - mn)
+        r = int(41 + (232 - 41) * ratio)
+        g = int(181 + (162 - 181) * ratio)
+        b = int(232 + (41 - 232) * ratio)
+        return f"background-color: rgba({r},{g},{b},0.5)"
+
+    styled = display_df.style.applymap(_color_cell, subset=num_cols)
+    st.dataframe(styled, use_container_width=True)

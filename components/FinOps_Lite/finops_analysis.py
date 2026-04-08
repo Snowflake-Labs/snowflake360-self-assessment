@@ -244,7 +244,7 @@ def comp_finops_analyzer(entry_actions=None):
 
         selected = st.selectbox("Warehouse Name", entities, key="fin_entity_select")
 
-        if st.button("Analyze", key="fin_indiv_btn", type="secondary"):
+        if st.button("Analyze", key="fin_indiv_btn"):
             indiv_key = f"fin_indiv_{selected}"
             _prog = st.progress(0)
             _stat = st.empty()
