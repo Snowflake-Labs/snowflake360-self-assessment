@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
+import base64
 from datetime import datetime
 from snowflake.snowpark.context import get_active_session
 import core as cr
@@ -275,7 +276,8 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
     )
     st.markdown(
         '<p style="color: #C0392B; font-weight: 700; font-size: 1rem; margin-top: 16px;">'
-        'Warning: Clicking on a Topic button on the left will kick off the analysis that can take over a minute to complete'
+        'Warning: Clicking on a Topic button on the left will kick off the analysis that can take over a minute to complete<br>'
+        'Each Topic will also use AI to generate analysis based on those topics'
         '</p>',
         unsafe_allow_html=True
     )
@@ -343,21 +345,7 @@ else:
             f"<h3 style='margin-top: 0px; margin-bottom: 16px; font-size: 1.75rem; line-height: 1.2;'>{selected_menu}</h3>",
             unsafe_allow_html=True
         )
-    with _hdr_right:
-        if selected_menu in TOPIC_EXPORTERS and _export_ready(selected_menu):
-            st.markdown('<span class="telemetry-btn-anchor"></span>', unsafe_allow_html=True)
-            _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
-            _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            def _gen_export(menu=selected_menu, fname=_fname):
-                _acct = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
-                return TOPIC_EXPORTERS[menu](_acct).encode()
-            st.download_button(
-                label="Export Telemetry for Printing",
-                data=_gen_export(),
-                file_name=_fname,
-                mime="text/html",
-                key=f"export_{_nav_key(selected_menu)}",
-            )
+    _export_placeholder = _hdr_right.empty()
 
     if selected_menu in loaded_catalog:
         available_tabs = [m['tab_name'] for m in loaded_catalog[selected_menu]]
@@ -387,5 +375,25 @@ else:
                             f'Error loading {tab_name}: {str(e)}</div>',
                             unsafe_allow_html=True
                         )
+
+    if selected_menu in TOPIC_EXPORTERS and _export_ready(selected_menu):
+        with _export_placeholder.container():
+            _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
+            _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            def _gen_export(menu=selected_menu, fname=_fname):
+                _acct = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
+                return TOPIC_EXPORTERS[menu](_acct)
+            _html_str = _gen_export()
+            _b64 = base64.b64encode(_html_str.encode()).decode()
+            _href = f'data:text/html;base64,{_b64}'
+            st.markdown(
+                f'<a href="{_href}" download="{_fname}" '
+                f'style="display:inline-block;width:100%;text-align:center;padding:0.5rem 1rem;'
+                f'background-color:{BRAND_PRIMARY};color:#fff;border-radius:0.5rem;'
+                f'text-decoration:none;font-size:0.875rem;font-weight:600;'
+                f'box-sizing:border-box;">'
+                f'Export Telemetry for Printing</a>',
+                unsafe_allow_html=True,
+            )
 
 st.markdown(global_settings.APP_VERSION_FOOTER, unsafe_allow_html=True)

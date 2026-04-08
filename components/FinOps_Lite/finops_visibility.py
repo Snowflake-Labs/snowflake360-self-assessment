@@ -447,7 +447,7 @@ def _render_cost_anomalies(cp):
         st.info("No cost anomalies detected in the last 60 days.")
         return
 
-    severity_colors = {"CRITICAL": "#E74C3C", "HIGH": _CA, "MODERATE": _C1, "LOW": _C3}
+    severity_colors = {"CRITICAL": "#003D73", "HIGH": _CA, "MODERATE": _C1, "LOW": _C3}
 
     chart_df = df.sort_values("ANOMALY_DATE", ascending=True).copy()
     dates = [str(d)[:10] for d in chart_df["ANOMALY_DATE"].tolist()]
@@ -482,7 +482,7 @@ def _render_cost_anomalies(cp):
 
     st.markdown(
         "**Severity Legend:** "
-        '<span style="color:#E74C3C">&#9608; CRITICAL (>100%)</span> · '
+        '<span style="color:#003D73">&#9608; CRITICAL (>100%)</span> · '
         f'<span style="color:{_CA}">&#9608; HIGH (>50%)</span> · '
         f'<span style="color:{_C1}">&#9608; MODERATE (>25%)</span> · '
         f'<span style="color:{_C3}">&#9608; LOW (≤25%)</span>',
