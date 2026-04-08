@@ -22,24 +22,44 @@ The app includes:
 
 ## Install / Deploy
 
-This project is deployed to Snowflake using `snow streamlit deploy`.
+### First-time deployment (new account)
 
-1) Configure a Snowflake CLI connection:
+1. Configure a Snowflake CLI connection with a role that has ACCOUNTADMIN (or CREATE WAREHOUSE / CREATE DATABASE privileges):
 
 ```bash
-snow connection list
+snow connection list   # verify your connection exists
 ```
 
-2) Deploy the app to the Snowflake objects defined in `snowflake.yml`:
+2. Clone the repo and run the deploy script:
 
 ```bash
-snow streamlit deploy --connection <connection_name> --replace
+git clone <repo-url>
+cd s360_self_assessment
+
+./scripts/deploy.sh --connection <connection_name>
 ```
 
-If you want to keep the stage tidy and remove stale artifacts:
+This creates the warehouse, database, and schema, grants `ACCOUNT_USAGE` access, and deploys the Streamlit app in one step.
+
+**Custom targets** (if you don't want the defaults of `DEMOS` / `S360_SELF_ASSESS` / `S360_WH`):
 
 ```bash
-snow streamlit deploy --connection <connection_name> --replace --prune
+./scripts/deploy.sh --connection <connection_name> \
+    --database  MY_DB      \
+    --schema    MY_SCHEMA  \
+    --warehouse MY_WH
+```
+
+### Re-deploying (code updates only)
+
+```bash
+./scripts/deploy.sh --connection <connection_name> --skip-setup
+```
+
+Add `--prune` to also remove stale stage files after deleting a component:
+
+```bash
+./scripts/deploy.sh --connection <connection_name> --skip-setup --prune
 ```
 
 ## Running (Snowsight)
