@@ -549,7 +549,7 @@ def export_data_ingestion(account_name: str) -> str:
     top_kpis = []
     sub_sections = []
 
-    df_summary = _safe_df("ingestion_summary_data")
+    df_summary = _safe_df("di_ingestion_summary")
     if not df_summary.empty:
         for _, row in df_summary.iterrows():
             method = row.get("INGESTION_METHOD", "")
@@ -571,25 +571,25 @@ def export_data_ingestion(account_name: str) -> str:
         sub_sections.append(build_sub_section("Ingestion Summary", charts_html=sum_charts))
 
     # --- Bulk Load ---
-    df_bulk = _safe_df("ig_bulk_load")
+    df_bulk = _safe_df("di_copy_analysis")
     if not df_bulk.empty:
         sub_sections.append(build_sub_section("Bulk Load (COPY INTO)", tables_html=_df_table(df_bulk, list(df_bulk.columns)[:8])))
 
     # --- Snowpipe ---
-    df_pipe = _safe_df("ig_pipe_efficiency")
+    df_pipe = _safe_df("di_snowpipe_efficiency")
     if not df_pipe.empty:
         sub_sections.append(build_sub_section("Snowpipe Efficiency", tables_html=_df_table(df_pipe, list(df_pipe.columns)[:8])))
 
-    df_detail = _safe_df("ig_snowpipe_detail")
+    df_detail = _safe_df("di_top_pipe_consumers")
     if not df_detail.empty:
         sub_sections.append(build_sub_section("Snowpipe Detail", tables_html=_df_table(df_detail, list(df_detail.columns)[:8])))
 
-    df_cost = _safe_df("ig_pipe_cost_projection")
+    df_cost = _safe_df("di_credit_projection")
     if not df_cost.empty:
         sub_sections.append(build_sub_section("Snowpipe Cost Projection", tables_html=_df_table(df_cost, list(df_cost.columns)[:8])))
 
     # --- Streaming ---
-    df_stream = _safe_df("ingestion_streaming_data")
+    df_stream = _safe_df("di_streaming_credits")
     if not df_stream.empty:
         s_kpis = []
         date_col = next((c for c in ["USAGE_DATE", "START_DATE"] if c in df_stream.columns), None)
@@ -725,7 +725,7 @@ def export_finops(account_name: str) -> str:
     sub_sections = []
 
     # --- Visibility ---
-    df_fc = _safe_df("finops_exec_forecast")
+    df_fc = _safe_df("fv_exec_forecast")
     if not df_fc.empty:
         for _, row in df_fc.iterrows():
             cat = row.get("Category", "")
@@ -735,7 +735,7 @@ def export_finops(account_name: str) -> str:
         fc_tables = _df_table(df_fc, list(df_fc.columns)[:6])
         sub_sections.append(build_sub_section("Executive Forecast", tables_html=fc_tables))
 
-    df_cb = _safe_df("finops_compute_breakdown")
+    df_cb = _safe_df("fv_compute_breakdown")
     if not df_cb.empty:
         cb_charts = ""
         svc_col = next((c for c in ["Service Type", "SERVICE_TYPE"] if c in df_cb.columns), None)
@@ -748,19 +748,19 @@ def export_finops(account_name: str) -> str:
                                     title="Top Compute Consumers", x_title="Credits")
         sub_sections.append(build_sub_section("Compute Breakdown", charts_html=cb_charts, tables_html=_df_table(df_cb, list(df_cb.columns)[:6])))
 
-    df_cq = _safe_df("finops_costliest_queries")
+    df_cq = _safe_df("fv_costliest_queries")
     if not df_cq.empty:
         sub_sections.append(build_sub_section("Costliest Queries", tables_html=_df_table(df_cq, list(df_cq.columns)[:5], limit=20)))
 
-    df_sc = _safe_df("finops_storage_costs")
+    df_sc = _safe_df("fv_storage_costs")
     if not df_sc.empty:
         sub_sections.append(build_sub_section("Storage Costs", tables_html=_df_table(df_sc, list(df_sc.columns)[:6])))
 
-    df_dt = _safe_df("finops_data_transfer")
+    df_dt = _safe_df("fv_data_transfer")
     if not df_dt.empty:
         sub_sections.append(build_sub_section("Data Transfer", tables_html=_df_table(df_dt, list(df_dt.columns)[:3])))
 
-    df_anom = _safe_df("finops_anomalies")
+    df_anom = _safe_df("fv_anomalies")
     if not df_anom.empty:
         anom_chart = ""
         date_col = next((c for c in ["Anomaly Date", "ANOMALY_DATE"] if c in df_anom.columns), None)
@@ -883,7 +883,7 @@ def export_finops(account_name: str) -> str:
         sub_sections.append(build_sub_section("SPCS Credits", tables_html=_df_table(df_spcs, list(df_spcs.columns)[:2])))
 
     # --- Optimization ---
-    df_ddl = _safe_df("fo_ddl")
+    df_ddl = _safe_df("fo_ddl_summary")
     if not df_ddl.empty:
         ddl_kpis = []
         r = df_ddl.iloc[0]
@@ -891,7 +891,7 @@ def export_finops(account_name: str) -> str:
             if col in df_ddl.columns:
                 ddl_kpis.append({"value": _fmt_num(r.get(col), 0), "label": label})
         ddl_tables = ""
-        df_tddl = _safe_df("fo_top_ddl")
+        df_tddl = _safe_df("fo_ddl_clone")
         if not df_tddl.empty:
             ddl_tables = _df_table(df_tddl, list(df_tddl.columns)[:4])
         sub_sections.append(build_sub_section("DDL Overhead", kpis=ddl_kpis, tables_html=ddl_tables))
@@ -899,12 +899,12 @@ def export_finops(account_name: str) -> str:
     df_cln = _safe_df("fo_clone_summary")
     if not df_cln.empty:
         cln_tables = ""
-        df_tc = _safe_df("fo_top_clone")
+        df_tc = _safe_df("fo_clone_summary")
         if not df_tc.empty:
             cln_tables = _df_table(df_tc, list(df_tc.columns)[:4])
         sub_sections.append(build_sub_section("Clone Overhead", tables_html=cln_tables))
 
-    df_sq = _safe_df("fo_simple_queries")
+    df_sq = _safe_df("fo_short_queries")
     if not df_sq.empty:
         sub_sections.append(build_sub_section("Simple Queries", tables_html=_df_table(df_sq, list(df_sq.columns)[:6])))
 
@@ -924,11 +924,11 @@ def export_finops(account_name: str) -> str:
     if not df_cx.empty:
         sub_sections.append(build_sub_section("Complex Queries", tables_html=_df_table(df_cx, list(df_cx.columns)[:7])))
 
-    df_cp = _safe_df("fo_summary")
+    df_cp = _safe_df("fo_copy_summary")
     if not df_cp.empty:
         sub_sections.append(build_sub_section("COPY Pattern Summary", tables_html=_df_table(df_cp, list(df_cp.columns)[:3])))
 
-    df_pat = _safe_df("fo_patterns")
+    df_pat = _safe_df("fo_copy_patterns")
     if not df_pat.empty:
         sub_sections.append(build_sub_section("COPY Patterns", tables_html=_df_table(df_pat, list(df_pat.columns)[:7])))
 
@@ -1093,43 +1093,340 @@ def export_recovery_devops(account_name: str) -> str:
     top_kpis = []
     sub_sections = []
 
-    for key, label in [("devops_git_count", "Git Users"), ("devops_cicd_count", "CI/CD Users"),
-                       ("devops_dt_count", "Dynamic Tables"), ("devops_task_count", "Task Executions")]:
-        df = _safe_df(key)
-        if not df.empty:
-            val = df.iloc[0, 0] if len(df.columns) > 0 else 0
-            top_kpis.append({"value": _fmt_num(val, 0), "label": label})
-
-    # --- Combined Overview ---
-    df_combined = _safe_df("devops_combined")
-    if not df_combined.empty:
-        sub_sections.append(build_sub_section("DevOps Overview", tables_html=_df_table(df_combined, list(df_combined.columns)[:6])))
-
-    # --- DCM Adoption ---
     df_dcm = _safe_df("rd_dcm_adoption")
-    if not df_dcm.empty:
-        sub_sections.append(build_sub_section("Database Change Management (DCM)", tables_html=_df_table(df_dcm, list(df_dcm.columns)[:6])))
-
-    # --- Git Integration ---
     df_git = _safe_df("rd_git_integration")
-    if not df_git.empty:
-        sub_sections.append(build_sub_section("Git Integration", tables_html=_df_table(df_git, list(df_git.columns)[:6])))
+    df_cicd_sum = _safe_df("rd_cicd_summary")
+    df_cicd_det = _safe_df("rd_cicd_detail")
+    df_orch = _safe_df("rd_orchestration")
+    df_dt_inv = _safe_df("rd_dt_inventory")
+    df_dt_stats = _safe_df("rd_dt_refresh_stats")
+    df_dt_daily = _safe_df("rd_dt_daily_refresh")
+    df_mat_sum = _safe_df("rd_maturity_summary")
+    df_mat_score = _safe_df("rd_maturity_score")
 
-    # --- CI/CD Automation ---
-    df_cicd = _safe_df("rd_cicd_automation")
-    if not df_cicd.empty:
-        sub_sections.append(build_sub_section("CI/CD Automation", tables_html=_df_table(df_cicd, list(df_cicd.columns)[:6])))
+    # ── Top KPIs ──
+    total_ddl = int(df_dcm["EXECUTION_COUNT"].sum()) if not df_dcm.empty and "EXECUTION_COUNT" in df_dcm.columns else 0
+    declarative = 0
+    git_deploys = 0
+    top_pattern = "—"
+    if not df_dcm.empty and "DDL_PATTERN" in df_dcm.columns:
+        for _, r in df_dcm.iterrows():
+            pat = str(r.get("DDL_PATTERN", ""))
+            cnt = int(r.get("EXECUTION_COUNT", 0) or 0)
+            if "Declarative" in pat:
+                declarative += cnt
+            if "Deployment from File" in pat or "Git" in pat:
+                git_deploys += cnt
+        top_pattern = str(df_dcm.iloc[0]["DDL_PATTERN"]) if len(df_dcm) > 0 else "—"
+    top_kpis = [
+        {"value": _fmt_num(total_ddl, 0), "label": "Successful DDL Ops (30d)"},
+        {"value": _fmt_num(declarative, 0), "label": "Declarative DDL"},
+        {"value": _fmt_num(git_deploys, 0), "label": "Git-Based Deployments"},
+        {"value": _esc(top_pattern), "label": "Top Pattern"},
+    ]
 
-    # --- Declarative Pipelines ---
-    df_pipe = _safe_df("rd_declarative_pipeline")
-    if not df_pipe.empty:
-        sub_sections.append(build_sub_section("Declarative Pipelines", tables_html=_df_table(df_pipe, list(df_pipe.columns)[:6])))
+    # ── DCM Adoption ──
+    dcm_kpis = list(top_kpis)
+    dcm_charts = ""
+    dcm_tables = ""
+    if not df_dcm.empty and "DDL_PATTERN" in df_dcm.columns:
+        labels = df_dcm["DDL_PATTERN"].tolist()
+        counts = [int(v) for v in df_dcm["EXECUTION_COUNT"].tolist()]
+        dcm_charts += '<div class="charts-row"><div class="chart-col">'
+        dcm_charts += build_chart("doughnut",
+                                  labels=labels, data=counts,
+                                  colors=[_P, _S, _T, _A][:len(labels)])
+        dcm_charts += '</div><div class="chart-col">'
+        dcm_charts += build_chart("hbar",
+                                  labels=_trunc_labels(labels),
+                                  datasets=[{"label": "Executions", "data": counts, "backgroundColor": _S}],
+                                  title="DDL Pattern Execution Count (30d)")
+        dcm_charts += "</div></div>"
+
+        if "DISTINCT_USERS" in df_dcm.columns and "DISTINCT_ROLES" in df_dcm.columns:
+            users = [int(v) for v in df_dcm["DISTINCT_USERS"].tolist()]
+            roles = [int(v) for v in df_dcm["DISTINCT_ROLES"].tolist()]
+            dcm_charts += '<div class="charts-row" style="align-items:flex-start;margin-top:14px;">'
+            dcm_charts += '  <div class="chart-col" style="flex:0 0 42%;">'
+            dcm_charts += build_chart("vbar",
+                                      labels=_trunc_labels(labels),
+                                      datasets=[
+                                          {"label": "Distinct Users", "data": users, "backgroundColor": _P},
+                                          {"label": "Distinct Roles", "data": roles, "backgroundColor": _A},
+                                      ],
+                                      title="Pattern Participation Coverage (Users vs Roles)")
+            dcm_charts += "</div>"
+            pct_col = [str(v) + "%" if v is not None else "—" for v in df_dcm.get("PCT_OF_TOTAL", pd.Series(dtype=float)).tolist()] if "PCT_OF_TOTAL" in df_dcm.columns else []
+            dcm_charts += '  <div class="chart-col" style="flex:1;overflow-x:auto;">'
+            dcm_tables += '<div class="section-subtitle">Pattern Coverage Detail</div>'
+            det_cols = ["DDL_PATTERN", "EXECUTION_COUNT", "DISTINCT_USERS", "DISTINCT_ROLES"]
+            if "PCT_OF_TOTAL" in df_dcm.columns:
+                det_cols.append("PCT_OF_TOTAL")
+            dcm_tables += _df_table(df_dcm, det_cols)
+            dcm_charts += dcm_tables
+            dcm_charts += "</div></div>"
+            dcm_tables = ""
+    sub_sections.append(build_sub_section("Database Change Management (DCM) Adoption",
+                                          kpis=dcm_kpis, charts_html=dcm_charts, tables_html=dcm_tables))
+
+    # ── Git Integration ──
+    git_kpis = []
+    git_charts = ""
+    git_tables = ""
+    if not df_git.empty and "OPERATION_TYPE" in df_git.columns:
+        total_ops = int(df_git["COUNT_OPS"].sum()) if "COUNT_OPS" in df_git.columns else 0
+        n_cats = df_git["OPERATION_TYPE"].nunique()
+        top_git = str(df_git.iloc[0]["OPERATION_TYPE"]) if len(df_git) > 0 else "—"
+        max_users = int(df_git["DISTINCT_USERS"].max()) if "DISTINCT_USERS" in df_git.columns else 0
+        git_kpis = [
+            {"value": _fmt_num(total_ops, 0), "label": "Git Operations (30d)"},
+            {"value": str(n_cats), "label": "Operation Categories"},
+            {"value": _esc(top_git), "label": "Top Git Activity"},
+            {"value": _fmt_num(max_users, 0), "label": "Max Users / Operation"},
+        ]
+        labels = df_git["OPERATION_TYPE"].tolist()
+        ops = [int(v) for v in df_git["COUNT_OPS"].tolist()]
+        users = [int(v) for v in df_git["DISTINCT_USERS"].tolist()]
+
+        git_charts += '<div class="charts-row"><div class="chart-col">'
+        git_charts += build_chart("hbar",
+                                  labels=_trunc_labels(labels),
+                                  datasets=[{"label": "Operations", "data": ops, "backgroundColor": _S}],
+                                  title="Git Operation Categories (30d)")
+        git_charts += '</div><div class="chart-col">'
+        git_charts += build_chart("doughnut",
+                                  labels=labels, data=ops,
+                                  colors=[_P, _S, _T, _A][:len(labels)])
+        git_charts += "</div></div>"
+
+        git_charts += '<div class="charts-row" style="align-items:flex-start;margin-top:14px;">'
+        git_charts += '  <div class="chart-col" style="flex:0 0 42%;">'
+        git_charts += build_chart("hbar",
+                                  labels=_trunc_labels(labels),
+                                  datasets=[{"label": "Distinct Users", "data": users, "backgroundColor": _T}],
+                                  title="Distinct Users by Git Operation")
+        git_charts += "</div>"
+        git_charts += '  <div class="chart-col" style="flex:1;overflow-x:auto;">'
+        git_charts += '<div class="section-subtitle">Git Integration Detail</div>'
+        git_charts += _df_table(df_git, ["OPERATION_TYPE", "COUNT_OPS", "DISTINCT_USERS"])
+        git_charts += "</div></div>"
+    sub_sections.append(build_sub_section("Git Integration Usage",
+                                          kpis=git_kpis, charts_html=git_charts, tables_html=git_tables))
+
+    # ── CI/CD Tool Automation ──
+    cicd_kpis = []
+    cicd_charts = ""
+    cicd_tables = ""
+    if not df_cicd_sum.empty and "DEPLOYMENT_AGENT" in df_cicd_sum.columns:
+        total_ops = int(df_cicd_sum["DDL_OPERATIONS_COUNT"].sum()) if "DDL_OPERATIONS_COUNT" in df_cicd_sum.columns else 0
+        n_agents = df_cicd_sum["DEPLOYMENT_AGENT"].nunique()
+        automated_pct = 0
+        top_agent = str(df_cicd_sum.iloc[0]["DEPLOYMENT_AGENT"]) if len(df_cicd_sum) > 0 else "—"
+        if "PCT_OF_DDL_OPS" in df_cicd_sum.columns:
+            svc_mask = ~df_cicd_sum["DEPLOYMENT_AGENT"].str.contains("Human", na=False)
+            automated_pct = _num(df_cicd_sum.loc[svc_mask, "PCT_OF_DDL_OPS"].sum(), 1) if svc_mask.any() else 0
+        cicd_kpis = [
+            {"value": _fmt_num(total_ops, 0), "label": "DDL Ops Attributed (30d)"},
+            {"value": str(n_agents), "label": "Deployment Agents"},
+            {"value": f"{automated_pct}%", "label": "Automated DDL Share"},
+            {"value": _esc(top_agent), "label": "Top Agent"},
+        ]
+        labels = df_cicd_sum["DEPLOYMENT_AGENT"].tolist()
+        ops = [int(v) for v in df_cicd_sum["DDL_OPERATIONS_COUNT"].tolist()]
+        cicd_charts += '<div class="charts-row"><div class="chart-col">'
+        cicd_charts += build_chart("hbar",
+                                   labels=_trunc_labels(labels),
+                                   datasets=[{"label": "DDL Operations", "data": ops, "backgroundColor": _P}],
+                                   title="CI/CD Tool Summary (30d)")
+        cicd_charts += '</div><div class="chart-col">'
+        cicd_charts += build_chart("doughnut",
+                                   labels=labels, data=ops,
+                                   colors=[_P, _S, _T, _A, "#023E8A", "#48CAE4"][:len(labels)])
+        cicd_charts += "</div></div>"
+
+        if not df_cicd_sum.empty and "SESSION_COUNT" in df_cicd_sum.columns:
+            sessions = [int(v) for v in df_cicd_sum["SESSION_COUNT"].tolist()]
+            cicd_charts += '<div class="chart-block-full">'
+            cicd_charts += build_chart("hbar",
+                                       labels=_trunc_labels(labels),
+                                       datasets=[{"label": "Distinct Sessions", "data": sessions, "backgroundColor": _T}],
+                                       title="Session Footprint by Deployment Agent")
+            cicd_charts += "</div>"
+
+    if not df_cicd_det.empty:
+        det_cols = [c for c in ["DEPLOYMENT_AGENT", "CLIENT_APPLICATION_ID", "SESSION_COUNT",
+                                "DDL_OPERATIONS_COUNT", "DISTINCT_USERS"] if c in df_cicd_det.columns]
+        cicd_tables = '<div class="section-subtitle">CI/CD Tool Identification Detail</div>'
+        cicd_tables += _df_table(df_cicd_det, det_cols)
+    sub_sections.append(build_sub_section("CI/CD Tool Automation",
+                                          kpis=cicd_kpis, charts_html=cicd_charts, tables_html=cicd_tables))
+
+    # ── Orchestration Patterns ──
+    orch_kpis = []
+    orch_charts = ""
+    orch_tables = ""
+    dt_count = db_count = schema_count = total_refreshes = avg_lag = 0
+    if not df_dt_inv.empty:
+        r = df_dt_inv.iloc[0]
+        dt_count = int(r.get("DT_COUNT", 0) or 0)
+        db_count = int(r.get("DB_COUNT", 0) or 0)
+        schema_count = int(r.get("SCHEMA_COUNT", 0) or 0)
+    if not df_dt_stats.empty:
+        r = df_dt_stats.iloc[0]
+        total_refreshes = int(r.get("TOTAL_REFRESHES", 0) or 0)
+        avg_lag = _num(r.get("AVG_LAG_MIN", 0))
+    orch_kpis = [
+        {"value": _fmt_num(dt_count, 0), "label": "Dynamic Tables"},
+        {"value": str(db_count), "label": "Databases"},
+        {"value": str(schema_count), "label": "Schemas"},
+        {"value": _fmt_num(total_refreshes, 0), "label": "Refreshes (30d)"},
+        {"value": str(avg_lag), "label": "Avg Lag (min)"},
+    ]
+
+    if not df_orch.empty and "ORCHESTRATION_TYPE" in df_orch.columns:
+        labels = df_orch["ORCHESTRATION_TYPE"].tolist()
+        activity = [int(v) for v in df_orch["ACTIVITY_COUNT"].tolist()] if "ACTIVITY_COUNT" in df_orch.columns else []
+        objects = [int(v) for v in df_orch["DISTINCT_OBJECTS"].tolist()] if "DISTINCT_OBJECTS" in df_orch.columns else []
+        orch_charts += '<div class="section-subtitle">Declarative vs Imperative Orchestration (7d)</div>'
+        if activity:
+            orch_charts += '<div class="charts-row"><div class="chart-col">'
+            orch_charts += build_chart("hbar",
+                                       labels=_trunc_labels(labels),
+                                       datasets=[{"label": "Activity Count", "data": activity, "backgroundColor": _P}],
+                                       title="Orchestration Activity Count")
+            orch_charts += '</div><div class="chart-col">'
+        if objects:
+            orch_charts += build_chart("doughnut",
+                                       labels=labels, data=objects,
+                                       colors=[_P, _S])
+            orch_charts += "</div></div>"
+
+    orch_charts += '<div class="section-subtitle">Dynamic Table Operational Detail (30d)</div>'
+    if not df_dt_stats.empty and total_refreshes > 0:
+        pass
+    else:
+        orch_charts += '<div class="charts-row"><div class="chart-col">'
+        orch_charts += '<div class="chart-block"><div class="chart-title">Refreshes by Dynamic Table (30d)</div>'
+        orch_charts += '<p class="no-data-note">No dynamic table refresh detail rows were available for this run.</p></div>'
+        orch_charts += '</div><div class="chart-col">'
+        orch_charts += '<div class="chart-block"><div class="chart-title">Refresh Outcome Distribution (30d)</div>'
+        orch_charts += '<p class="no-data-note">No refresh outcome data was available for this run.</p></div>'
+        orch_charts += '</div></div>'
+
+    if not df_dt_daily.empty and "REFRESH_DATE" in df_dt_daily.columns:
+        labels_d = [str(d) for d in df_dt_daily["REFRESH_DATE"].tolist()]
+        ds = []
+        if "SUCCESS" in df_dt_daily.columns:
+            ds.append({"label": "Success", "data": [int(v) for v in df_dt_daily["SUCCESS"].tolist()],
+                        "borderColor": _P, "backgroundColor": "rgba(41,181,232,0.15)", "fill": True})
+        if "FAILURES" in df_dt_daily.columns:
+            ds.append({"label": "Failures", "data": [int(v) for v in df_dt_daily["FAILURES"].tolist()],
+                        "borderColor": _A, "backgroundColor": "rgba(232,162,41,0.15)", "fill": True})
+        if ds:
+            orch_charts += build_chart("line", labels=labels_d, datasets=ds,
+                                        title="Daily Refresh Trend (30d)", y_title="Refreshes")
+    else:
+        orch_charts += '<div class="charts-row"><div class="chart-col">'
+        orch_charts += '<div class="chart-block"><div class="chart-title">Average Lag by Dynamic Table (30d)</div>'
+        orch_charts += '<p class="no-data-note">No lag metrics were available for this run.</p></div>'
+        orch_charts += '</div><div class="chart-col">'
+        orch_charts += '<div class="chart-block"><div class="chart-title">Daily Refresh Trend (30d)</div>'
+        orch_charts += '<p class="no-data-note">No dynamic table refresh trend data was available for this run.</p></div>'
+        orch_charts += '</div></div>'
+
+    sub_sections.append(build_sub_section("Orchestration Patterns",
+                                          kpis=orch_kpis, charts_html=orch_charts, tables_html=orch_tables))
+
+    # ── DevOps Maturity Summary ──
+    mat_kpis = []
+    mat_charts = ""
+    mat_tables = ""
+    maturity_level = "—"
+    mat_decl = mat_git = mat_total = 0
+    recommendation = ""
+    if not df_mat_score.empty:
+        r = df_mat_score.iloc[0]
+        maturity_level = str(r.get("DEVOPS_MATURITY_LEVEL", "—"))
+        mat_decl = int(r.get("DECLARATIVE_DDL", 0) or 0)
+        mat_git = int(r.get("GIT_DEPLOYS", 0) or 0)
+        mat_total = int(r.get("TOTAL_DDL", 0) or 0)
+        recommendation = str(r.get("PRIMARY_RECOMMENDATION", ""))
+    mat_kpis = [
+        {"value": maturity_level, "label": "Maturity Level"},
+        {"value": _fmt_num(mat_decl, 0), "label": "Declarative DDL"},
+        {"value": _fmt_num(mat_git, 0), "label": "Git Deployments"},
+        {"value": _fmt_num(mat_total, 0), "label": "Total Successful DDL"},
+    ]
+
+    if not df_mat_sum.empty and "METRIC_NAME" in df_mat_sum.columns:
+        labels = df_mat_sum["METRIC_NAME"].tolist()
+        values = [_num(v) for v in df_mat_sum["METRIC_VALUE"].tolist()]
+        mat_charts += '<div class="charts-row"><div class="chart-col">'
+        mat_charts += build_chart("hbar",
+                                  labels=_trunc_labels(labels),
+                                  datasets=[{"label": "Metric Value", "data": values, "backgroundColor": _P}],
+                                  title="DevOps Summary Metrics")
+        mat_charts += '</div><div class="chart-col">'
+
+        cat_agg = {}
+        if "METRIC_CATEGORY" in df_mat_sum.columns:
+            for _, row in df_mat_sum.iterrows():
+                cat = str(row.get("METRIC_CATEGORY", "Other"))
+                val = _num(row.get("METRIC_VALUE", 0))
+                cat_agg[cat] = cat_agg.get(cat, 0) + val
+        if cat_agg:
+            mat_charts += build_chart("doughnut",
+                                      labels=list(cat_agg.keys()),
+                                      data=list(cat_agg.values()),
+                                      colors=[_P, _S, _T][:len(cat_agg)])
+        mat_charts += "</div></div>"
+
+    score_val = 1.0
+    score_map = {"NO_DATA": 0, "BASIC": 1.0, "INTERMEDIATE": 2.0, "ADVANCED": 3.0}
+    score_val = score_map.get(maturity_level, 1.0)
+
+    mat_charts += '<div class="charts-row" style="align-items:flex-start;margin-top:14px;">'
+    mat_charts += '  <div class="chart-col" style="flex:0 0 42%;">'
+    mat_charts += build_chart("gauge", score=score_val, max_score=3.0,
+                              color="#F39C12", title=f"DevOps Maturity Score (0-3)")
+    mat_charts += "</div>"
+    mat_charts += '  <div class="chart-col" style="flex:1;overflow-x:auto;">'
+    if recommendation:
+        mat_charts += '<div class="section-subtitle">Primary Recommendation</div>'
+        mat_charts += _make_table(["Recommendation"], [[recommendation]])
+    mat_charts += "</div></div>"
+
+    if not df_mat_sum.empty:
+        det_cols = [c for c in ["METRIC_CATEGORY", "METRIC_NAME", "METRIC_VALUE", "PCT_OF_TOTAL"]
+                    if c in df_mat_sum.columns]
+        if det_cols:
+            mat_tables = _df_table(df_mat_sum, det_cols)
+    sub_sections.append(build_sub_section("DevOps Maturity Summary",
+                                          kpis=mat_kpis, charts_html=mat_charts, tables_html=mat_tables))
+
+    # ── Individual Analyses ──
+    analyzer_text = _safe_text("recovery_devops_analysis_result")
+
+    ov_entities = st.session_state.get("rd_ov_entities", [])
+    indiv_analyses = []
+    for e in ov_entities:
+        text = _safe_text(f"rd_ov_indiv_{e}")
+        if text:
+            indiv_analyses.append({"title": str(e), "content": text})
+    if not indiv_analyses:
+        entity_cache = st.session_state.get("rd_entity_list", [])
+        for e in entity_cache:
+            text = _safe_text(f"rd_indiv_{e}")
+            if text:
+                indiv_analyses.append({"title": str(e), "content": text})
 
     return build_report(
         topic_name="Data Recovery & DevOps",
         account_name=account_name,
         top_kpis=top_kpis,
+        analyzer_summary=analyzer_text,
         sub_sections=sub_sections,
+        individual_analyses=indiv_analyses if indiv_analyses else None,
     )
 
 

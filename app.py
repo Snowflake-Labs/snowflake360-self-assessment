@@ -173,10 +173,10 @@ _EXPORT_SENTINELS = {
     "Database Management":    lambda: bool(_db_cache),
     "Virtual Warehouses":     lambda: "wh_fleet_data" in st.session_state,
     "Access Control":         lambda: "auth_role_hygiene" in st.session_state,
-    "Data Ingestion":         lambda: "ingestion_streaming_data" in st.session_state,
+    "Data Ingestion":         lambda: "di_copy_analysis" in st.session_state,
     "Data Transformation":    lambda: "tf_overview" in st.session_state,
-    "FinOps (lite)":          lambda: "finops_exec_forecast" in st.session_state,
-    "Data Recovery & DevOps": lambda: "devops_git_count" in st.session_state,
+    "FinOps (lite)":          lambda: "fv_exec_forecast" in st.session_state,
+    "Data Recovery & DevOps": lambda: "rd_dcm_adoption" in st.session_state,
     "Data Governance":        lambda: "dg_health_score_data" in st.session_state,
 }
 
