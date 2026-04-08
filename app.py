@@ -357,7 +357,7 @@ else:
                 file_name=_fname,
                 mime="text/html",
                 key=f"export_{_nav_key(selected_menu)}",
-                type="secondary",
+
             )
 
     if selected_menu in loaded_catalog:

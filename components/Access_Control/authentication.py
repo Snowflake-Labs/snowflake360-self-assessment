@@ -211,7 +211,7 @@ def _render_auth_failures():
         st.markdown("**Failure Volume by Severity**")
         sev_agg = df.groupby("SEVERITY")["FAILURE_COUNT"].sum().reset_index() if "SEVERITY" in df.columns else pd.DataFrame()
         if not sev_agg.empty:
-            sev_color = {"CRITICAL": "#E74C3C", "HIGH": _C2, "MODERATE": _C1, "LOW": _C3}
+            sev_color = {"CRITICAL": _CA, "HIGH": _C2, "MODERATE": _C1, "LOW": _C3}
             colors = [sev_color.get(s, _C1) for s in sev_agg["SEVERITY"]]
             _bar(sev_agg["SEVERITY"].tolist(), sev_agg["FAILURE_COUNT"].tolist(),
                  colors, xlabel="Severity", ylabel="Failures", key="af_sev")
@@ -522,7 +522,7 @@ def _render_trust_center():
         st.markdown("**Scanner Package Severity Distribution**")
         sev_agg = df.groupby("FINDINGS_SEVERITY").size().reset_index(name="COUNT")
         sev_colors_map = {
-            "CRITICAL": "#E74C3C", "HIGH": _CA, "MODERATE": _C1,
+            "CRITICAL": _CA, "HIGH": _CA, "MODERATE": _C1,
             "LOW": _C3, "CLEAR": _C1
         }
         colors = [sev_colors_map.get(s, _C1) for s in sev_agg["FINDINGS_SEVERITY"]]

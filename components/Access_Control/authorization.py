@@ -454,7 +454,7 @@ def _render_privileged_access():
         st.markdown("**Risk Distribution**")
         risk_counts = df["RISK_LEVEL"].value_counts().reset_index()
         risk_counts.columns = ["RISK", "COUNT"]
-        risk_color = {"LOW": _C1, "MODERATE": _C2, "HIGH": _CA, "CRITICAL": "#E74C3C"}
+        risk_color = {"LOW": _C1, "MODERATE": _C2, "HIGH": _CA, "CRITICAL": _CA}
         colors = [risk_color.get(r, _C1) for r in risk_counts["RISK"]]
         _donut(risk_counts["RISK"].tolist(), risk_counts["COUNT"].tolist(), colors, key="pa_risk")
 
