@@ -254,7 +254,7 @@ ORDER BY 2 DESC
     "tf_syntax_hunter": """
 SELECT
     query_id,
-    query_text,
+    SUBSTR(query_text, 1, 200) AS query_preview,
 
     -- 1. ASOF JOIN
     CASE
@@ -627,4 +627,99 @@ SELECT
      A.*
      FROM AGGR A
 """,
+    "tf_view_dependency_v2": """
+WITH RECURSIVE view_lineage AS (
+    SELECT
+        referencing_database || '.' || referencing_schema || '.' || referencing_object_name AS parent_view,
+        referenced_database || '.' || referenced_schema || '.' || referenced_object_name AS child_object,
+        1 AS depth
+    FROM SNOWFLAKE.ACCOUNT_USAGE.object_dependencies
+    WHERE referencing_object_domain = 'VIEW'
+    UNION ALL
+    SELECT
+        od.referencing_database || '.' || od.referencing_schema || '.' || od.referencing_object_name,
+        vl.child_object,
+        vl.depth + 1
+    FROM SNOWFLAKE.ACCOUNT_USAGE.object_dependencies od
+    JOIN view_lineage vl
+        ON od.referenced_database || '.' || od.referenced_schema || '.' || od.referenced_object_name = vl.parent_view
+    WHERE vl.depth < 10
+),
+view_depths AS (
+    SELECT parent_view AS root_view, MAX(depth) AS max_depth
+    FROM view_lineage
+    GROUP BY parent_view
+)
+SELECT
+    root_view,
+    max_depth,
+    CASE
+        WHEN max_depth > 5 THEN 'CRITICAL_DEPTH'
+        WHEN max_depth > 3 THEN 'HIGH_DEPTH'
+        ELSE 'MODERATE_DEPTH'
+    END AS depth_severity,
+    CASE
+        WHEN max_depth > 5 THEN 'Refactor to reduce view nesting - consider materialized views'
+        WHEN max_depth > 3 THEN 'Review if intermediate views can be consolidated'
+        ELSE 'Acceptable depth'
+    END AS recommendation
+FROM view_depths
+WHERE max_depth > 2
+ORDER BY max_depth DESC
+        """,
+    "tf_workload_shape_v2": """
+SELECT
+    REGEXP_REPLACE(query_text, '\\\\b\\\\d+\\\\b', '?') AS query_pattern,
+    query_type,
+    COUNT(*) AS execution_count,
+    ROUND(AVG(execution_time), 2) AS avg_duration_ms,
+    SUM(rows_inserted + rows_updated + rows_deleted) AS total_rows_affected,
+    CASE
+        WHEN AVG(execution_time) < 500 AND COUNT(*) > 100 THEN '\u26a0\ufe0f Micro-Updates (Batch these!)'
+        WHEN COUNT(*) > 50 THEN '\u2705 Frequent Pattern'
+        ELSE 'OK'
+    END AS recommendation
+FROM SNOWFLAKE.ACCOUNT_USAGE.query_history
+WHERE query_type IN ('UPDATE', 'INSERT', 'DELETE')
+  AND start_time >= DATEADD('day', -7, CURRENT_TIMESTAMP())
+GROUP BY REGEXP_REPLACE(query_text, '\\\\b\\\\d+\\\\b', '?'), query_type
+HAVING COUNT(*) > 50
+ORDER BY execution_count DESC
+LIMIT 20
+        """,
+    "tf_mv_inventory": """
+SELECT
+    table_catalog || '.' || table_schema || '.' || table_name AS mv_name,
+    ROUND(COALESCE(bytes, 0) / POW(1024, 3), 4) AS size_gb,
+    COALESCE(row_count, 0) AS row_count,
+    created::DATE AS created_date
+FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+WHERE table_type = 'MATERIALIZED VIEW'
+  AND deleted IS NULL
+ORDER BY bytes DESC NULLS LAST
+LIMIT 100
+        """,
+    "tf_lifecycle_agg": """
+WITH short_lived AS (
+    SELECT 'SHORT_LIVED' AS lifespan_category, COUNT(*) AS object_count
+    FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+    WHERE deleted IS NOT NULL
+      AND DATEDIFF('minute', created, deleted) < 60
+      AND table_type != 'TEMPORARY'
+),
+secure_views AS (
+    SELECT 'SECURE_VIEW' AS lifespan_category, COUNT(*) AS object_count
+    FROM SNOWFLAKE.ACCOUNT_USAGE.VIEWS
+    WHERE is_secure = 'YES' AND deleted IS NULL
+),
+temp_tables AS (
+    SELECT 'TEMP_TABLE' AS lifespan_category, COUNT(*) AS object_count
+    FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+    WHERE table_type = 'TEMPORARY' AND deleted IS NULL
+)
+SELECT * FROM short_lived
+UNION ALL SELECT * FROM secure_views
+UNION ALL SELECT * FROM temp_tables
+ORDER BY object_count DESC
+        """,
 }

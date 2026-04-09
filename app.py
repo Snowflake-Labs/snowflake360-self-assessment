@@ -1,6 +1,7 @@
 import streamlit as st
 import traceback as _tb
 import time as _time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(
     page_title="Snowflake 360 Self-Assessment",
@@ -16,6 +17,14 @@ try:
     import core as cr
     from components.local import load_catalog
     from components.Analysis.invoke_metrics_comps import get_analysis_comp_handler
+    from components.Access_Control.access_control_overview import _prefetch_all_ac_queries
+    from components.Virtual_Warehouses.warehouse_overview import _prefetch_all_wh_queries
+    from components.Data_Ingestion.ingestion_overview import _prefetch_all_ingestion_queries
+    from components.FinOps_Lite.finops_overview import _prefetch_all_finops_queries
+    from components.Data_Recovery_DevOps.recovery_devops_overview import _prefetch_all_devops_queries
+    from components.Data_Transformation.transformation_overview import _prefetch_all_tf_queries
+    from components.Data_Governance_New.governance_overview import _prefetch_all_governance_queries
+    from components.Database_Management.db_overview import prefetch_db_overview_queries
     from core.config.design_tokens import (
         BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY,
         SURFACE_ALT, SURFACE_BASE,
@@ -393,32 +402,41 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
 
     st.session_state['_chart_sel'] = set(_selected_topics)
 
+    _TOPIC_PREFETCH_FNS = {
+        "Access Control": _prefetch_all_ac_queries,
+        "Virtual Warehouses": _prefetch_all_wh_queries,
+        "Data Ingestion": _prefetch_all_ingestion_queries,
+        "FinOps (lite)": _prefetch_all_finops_queries,
+        "Data Recovery & DevOps": _prefetch_all_devops_queries,
+        "Data Transformation": _prefetch_all_tf_queries,
+        "Data Governance": _prefetch_all_governance_queries,
+        "Database Management": prefetch_db_overview_queries,
+    }
+
     if _run_clicked and _selected_topics:
         st.session_state._charts_running = True
-        _overview_fns = {}
-        for _t in _selected_topics:
-            if _t in loaded_catalog and loaded_catalog[_t]:
-                _first_tab = loaded_catalog[_t][0]
-                _fn_ref = _first_tab.get('fn', '')
-                if _fn_ref and '.' in _fn_ref:
-                    _overview_fns[_t] = _fn_ref.split('.')[-1]
-
-        _total = len(_overview_fns)
+        _to_prefetch = {t: _TOPIC_PREFETCH_FNS[t] for t in _selected_topics if t in _TOPIC_PREFETCH_FNS}
+        _total = len(_to_prefetch)
         if _total > 0:
-            _prog = st.progress(0, text="Pre-warming charts...")
-            _handler = get_analysis_comp_handler()
-            for _i, (_topic, _method) in enumerate(_overview_fns.items()):
-                _prog.progress((_i) / _total, text=f"Loading {_topic}...")
+            _prog = st.progress(0, text=f"Loading {_total} topic(s) in parallel...")
+
+            def _run_one(topic, fn):
                 try:
-                    if hasattr(_handler, _method):
-                        _scratch = st.empty()
-                        with _scratch.container():
-                            getattr(_handler, _method)()
-                        _scratch.empty()
-                        st.session_state._charts_completed.add(_topic)
+                    fn()
                 except Exception:
                     pass
-            _prog.progress(1.0, text="All charts loaded!")
+                return topic
+
+            _futures = {}
+            with ThreadPoolExecutor(max_workers=_total) as _exec:
+                for _t, _fn in _to_prefetch.items():
+                    _futures[_exec.submit(_run_one, _t, _fn)] = _t
+                for _i, _fut in enumerate(as_completed(_futures), 1):
+                    _done_topic = _fut.result()
+                    st.session_state._charts_completed.add(_done_topic)
+                    _prog.progress(_i / _total, text=f"Loaded: {_done_topic} ({_i}/{_total})")
+
+            _prog.progress(1.0, text="All topics loaded!")
             _time.sleep(1)
             _prog.empty()
         st.session_state._charts_running = False

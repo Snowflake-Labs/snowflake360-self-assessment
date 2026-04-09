@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-try:
-    from streamlit_echarts import st_echarts
-except ImportError:
-    def st_echarts(**kwargs):
-        import streamlit as st
-        st.info("Chart unavailable (echarts not supported in SiS)")
+
+_C1 = '#29B5E8'
+_C2 = '#11567F'
+_C3 = '#75C2D8'
+_CA = '#E8A229'
 
 
 def _cached_sql(cache_key, sql):
@@ -23,817 +22,150 @@ def _cached_sql(cache_key, sql):
     return df
 
 
+_BULK_LOAD_QUERY = """
+WITH copy_stats AS (
+    SELECT
+        table_catalog_name || '.' || table_schema_name || '.' || table_name AS target_table,
+        COUNT(*) AS job_count,
+        SUM(row_count) AS total_rows_loaded,
+        ROUND(SUM(file_size) / POW(1024, 3), 2) AS total_gb,
+        ROUND(AVG(file_size) / POW(1024, 2), 2) AS avg_file_mb,
+        ROUND(MIN(file_size) / POW(1024, 2), 2) AS min_file_mb,
+        ROUND(MAX(file_size) / POW(1024, 2), 2) AS max_file_mb,
+        ROUND(STDDEV(file_size) / POW(1024, 2), 2) AS stddev_file_mb,
+        CASE
+            WHEN MAX(file_size) > (AVG(file_size) * 100) THEN '⚠️ High Variance (Outliers)'
+            WHEN AVG(file_size) / POW(1024, 2) < 10 THEN '⚠️ Small Files (<10MB)'
+            ELSE '✅ Healthy'
+        END AS health_check,
+        CASE
+            WHEN MAX(file_size) > (AVG(file_size) * 100) THEN 'High file size variance detected'
+            WHEN AVG(file_size) / POW(1024, 2) < 10 THEN 'Batch files before ingestion'
+            ELSE 'File sizing looks appropriate'
+        END AS recommendation
+    FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY
+    WHERE status = 'Loaded'
+      AND pipe_name IS NULL
+      AND last_load_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+    GROUP BY 1
+)
+SELECT
+    target_table,
+    job_count,
+    total_gb,
+    total_rows_loaded,
+    avg_file_mb,
+    min_file_mb,
+    max_file_mb,
+    stddev_file_mb,
+    health_check,
+    recommendation
+FROM copy_stats
+ORDER BY total_gb DESC
+LIMIT 20
+"""
+
+
 def comp_bulk_load_analysis(entry_actions=None):
-    """
-    Bulk Load (COPY INTO) Analysis Component
-
-    Analyzes bulk load operations using COPY INTO commands for last 30 days.
-    Shows top 20 tables by volume with file size metrics and health checks.
-    """
     try:
-        st.markdown("COPY command ingestion analysis for last 30 days showing top 20 tables by volume, "
-                    "file size metrics, and health checks for outliers and small files.<br><br>", unsafe_allow_html=True)
+        st.markdown("COPY command ingestion analysis — last 30 days, top 20 tables by volume.")
 
-        try:
-            from snowflake.snowpark.context import get_active_session
-            session = get_active_session()
-        except Exception as e:
-            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
-                        f'</div>', unsafe_allow_html=True)
-            return
-
-        if not session:
-            st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                            '⚠️&nbsp;&nbsp;Snowflake session not available.'
-                            '</div>', unsafe_allow_html=True)
-            return
-
-        query = """
-        WITH copy_stats AS (
-            SELECT
-                table_schema_name || '.' || table_name AS target_table,
-                COUNT(*) AS job_count,
-                SUM(file_size) / POW(1024, 3) AS total_gb_ingested,
-                AVG(file_size) / POW(1024, 2) AS avg_file_size_mb,
-                MAX(file_size) / POW(1024, 2) AS max_file_size_mb,
-
-                CASE
-                    WHEN MAX(file_size) > (AVG(file_size) * 100) THEN '⚠️ High Variance (Outliers)'
-                    WHEN AVG(file_size) < 10 THEN '⚠️ Small Files (<10MB)'
-                    ELSE '✅ Healthy'
-                END AS health_check
-
-            FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY
-            WHERE status = 'Loaded'
-              AND pipe_name IS NULL
-              AND last_load_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-            GROUP BY 1
-        )
-        SELECT
-            target_table,
-            job_count AS "Load Events",
-            ROUND(total_gb_ingested, 2) AS "Total GB",
-            ROUND(avg_file_size_mb, 2) AS "Avg File (MB)",
-            ROUND(max_file_size_mb, 2) AS "Max File (MB)",
-            health_check
-        FROM copy_stats
-        ORDER BY total_gb_ingested DESC
-        LIMIT 20
-        """
-
-        try:
-            df = _cached_sql("ig_bulk_load", query)
-        except Exception as e:
-            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
-                        f'</div>', unsafe_allow_html=True)
-            return
+        df = _cached_sql("ig_bulk_load", _BULK_LOAD_QUERY)
 
         if df.empty:
-            st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        '⚠️&nbsp;&nbsp;No COPY INTO data found for the last 30 days.'
-                        '</div>', unsafe_allow_html=True)
+            st.info("No COPY INTO data found for the last 30 days.")
             return
 
-        df.columns = ['TARGET_TABLE', 'LOAD_EVENTS', 'TOTAL_GB', 'AVG_FILE_MB', 'MAX_FILE_MB', 'HEALTH_CHECK']
+        df.columns = ['TARGET_TABLE', 'JOB_COUNT', 'TOTAL_GB', 'TOTAL_ROWS_LOADED',
+                      'AVG_FILE_MB', 'MIN_FILE_MB', 'MAX_FILE_MB', 'STDDEV_FILE_MB',
+                      'HEALTH_CHECK', 'RECOMMENDATION']
 
-        with st.expander("COPY INTO Load Statistics (Top 20 Tables)", expanded=True):
-            st.dataframe(
-                df,
-                use_container_width=True,
-            )
+        tables_loaded = len(df)
+        total_events = int(df['JOB_COUNT'].sum())
+        total_gb = float(df['TOTAL_GB'].sum())
+        healthy = len(df[df['HEALTH_CHECK'] == '✅ Healthy'])
 
-            st.markdown("---")
-            st.markdown("#### Ingestion Analytics Charts")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Tables Loaded", tables_loaded)
+        with c2:
+            st.metric("Total Load Events", f"{total_events:,}")
+        with c3:
+            st.metric("Total GB Ingested", f"{total_gb:,.2f}")
+        with c4:
+            st.metric("Healthy Tables", f"{healthy} / {tables_loaded}")
 
-            col1, col2 = st.columns(2)
+        with st.expander("COPY INTO Load Statistics — Top 20 Tables", expanded=True):
+            display_cols = ['TARGET_TABLE', 'JOB_COUNT', 'TOTAL_GB', 'TOTAL_ROWS_LOADED',
+                            'AVG_FILE_MB', 'MIN_FILE_MB', 'MAX_FILE_MB']
+            st.dataframe(df[display_cols], use_container_width=True)
 
-            with col1.container():
-                st.markdown("##### Top Tables by Total Volume Ingested (GB)")
-                _render_volume_chart(df, key_prefix="vol_")
+        st.markdown("#### Ingestion Analytics Charts")
 
-            with col2.container():
-                st.markdown("##### Load Events Distribution")
-                _render_load_events_chart(df, key_prefix="events_")
+        _render_section(df, 'TOTAL_GB', 'Total GB', 'Top Tables by Volume Ingested (GB)',
+                        'Total GB', _C1,
+                        ['TARGET_TABLE', 'TOTAL_GB', 'JOB_COUNT', 'TOTAL_ROWS_LOADED'],
+                        'Top Tables by Volume Ingested')
 
-            col3, col4 = st.columns(2)
+        _render_section(df, 'JOB_COUNT', 'Load Events', 'Load Events by Table',
+                        'Load Events', _C2,
+                        ['TARGET_TABLE', 'JOB_COUNT', 'TOTAL_GB', 'HEALTH_CHECK'],
+                        'Load Events by Table')
 
-            with col3.container():
-                st.markdown("##### Average File Size by Table (MB)")
-                _render_avg_file_size_chart(df, key_prefix="avgfile_")
+        _render_section(df, 'AVG_FILE_MB', 'Avg File (MB)', 'Average File Size by Table (MB)',
+                        'Avg File (MB)', _C3,
+                        ['TARGET_TABLE', 'AVG_FILE_MB', 'MIN_FILE_MB', 'MAX_FILE_MB', 'STDDEV_FILE_MB'],
+                        'Average File Size by Table')
 
-            with col4.container():
-                st.markdown("##### Health Check Summary")
-                _render_health_check_chart(df, key_prefix="health_")
+        _render_section(df, 'TOTAL_ROWS_LOADED', 'Rows Loaded', 'Rows Loaded by Table',
+                        'Rows Loaded', _C2,
+                        ['TARGET_TABLE', 'TOTAL_ROWS_LOADED', 'JOB_COUNT', 'TOTAL_GB'],
+                        'Rows Loaded by Table')
+
+        st.markdown("#### Bulk Load Health Status Distribution")
+        health_counts = df['HEALTH_CHECK'].value_counts().reset_index()
+        health_counts.columns = ['STATUS', 'COUNT']
+        hcolors = []
+        for s in health_counts['STATUS']:
+            if 'Healthy' in s:
+                hcolors.append(_C1)
+            else:
+                hcolors.append(_CA)
+        fig = go.Figure(go.Bar(
+            y=health_counts['STATUS'], x=health_counts['COUNT'],
+            orientation='h',
+            marker_color=hcolors,
+            text=health_counts['COUNT'], textposition='outside'
+        ))
+        fig.update_layout(height=250, margin=dict(t=20, b=40, l=180, r=50), xaxis_title='Tables')
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("#### Bulk Load Health Detail")
+        detail_cols = ['TARGET_TABLE', 'HEALTH_CHECK', 'AVG_FILE_MB', 'MAX_FILE_MB', 'RECOMMENDATION']
+        st.dataframe(df[detail_cols], use_container_width=True)
+
+        st.markdown("#### Recommendations")
+        rec_cols = ['TARGET_TABLE', 'HEALTH_CHECK', 'RECOMMENDATION']
+        st.dataframe(df[rec_cols], use_container_width=True)
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
-                    f'</div>', unsafe_allow_html=True)
+        st.error(f"Component Error: {e}")
 
 
-def _render_volume_chart(df, key_prefix=""):
-    """Render top tables by volume chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_volume_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_volume_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_volume_donut_chart(df, key_prefix)
-    else:
-        _render_volume_rose_chart(df, key_prefix)
-
-
-def _render_volume_bar_chart(df, key_prefix=""):
-    """Render volume bar chart using Plotly."""
-    plot_df = df.head(10).sort_values('TOTAL_GB', ascending=True)
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['TARGET_TABLE'],
-            x=plot_df['TOTAL_GB'],
-            orientation='h',
-            marker_color='#29B5E8',
-            text=[f"{val:.2f} GB" for val in plot_df['TOTAL_GB']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Volume: %{x:.2f} GB<extra></extra>'
-        )
-    ])
-
+def _render_section(df, value_col, value_label, chart_title, x_label, color, table_cols, table_title):
+    plot_df = df.head(10).sort_values(value_col, ascending=True)
+    fig = go.Figure(go.Bar(
+        y=plot_df['TARGET_TABLE'], x=plot_df[value_col], orientation='h',
+        marker_color=color,
+        text=[f"{v:,.2f}" if isinstance(v, float) else f"{int(v):,}" for v in plot_df[value_col]],
+        textposition='outside'
+    ))
     fig.update_layout(
-        height=400,
-        xaxis_title='Total GB Ingested',
-        yaxis_title='Target Table',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=120, r=50)
+        title=chart_title, xaxis_title=x_label,
+        height=400, margin=dict(t=40, b=40, l=120, r=60),
+        showlegend=False
     )
-
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}bar")
-
-
-def _render_volume_pie_chart(df, key_prefix=""):
-    """Render volume pie chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": float(row['TOTAL_GB']), "name": f"{row['TARGET_TABLE']} ({row['TOTAL_GB']:.2f} GB)"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Volume",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_volume_donut_chart(df, key_prefix=""):
-    """Render volume donut chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": float(row['TOTAL_GB']), "name": f"{row['TARGET_TABLE']} ({row['TOTAL_GB']:.2f} GB)"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Volume",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_volume_rose_chart(df, key_prefix=""):
-    """Render volume rose chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": float(row['TOTAL_GB']), "name": row['TARGET_TABLE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} GB ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Volume",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
-
-
-def _render_load_events_chart(df, key_prefix=""):
-    """Render load events chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_events_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_events_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_events_donut_chart(df, key_prefix)
-    else:
-        _render_events_rose_chart(df, key_prefix)
-
-
-def _render_events_bar_chart(df, key_prefix=""):
-    """Render load events bar chart using Plotly."""
-    plot_df = df.head(10).sort_values('LOAD_EVENTS', ascending=True)
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['TARGET_TABLE'],
-            x=plot_df['LOAD_EVENTS'],
-            orientation='h',
-            marker_color='#E8A229',
-            text=[f"{int(val)}" for val in plot_df['LOAD_EVENTS']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Load Events: %{x:,}<extra></extra>'
-        )
-    ])
-
-    fig.update_layout(
-        height=400,
-        xaxis_title='Load Events',
-        yaxis_title='Target Table',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=120, r=50)
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}bar")
-
-
-def _render_events_pie_chart(df, key_prefix=""):
-    """Render load events pie chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": int(row['LOAD_EVENTS']), "name": f"{row['TARGET_TABLE']} ({int(row['LOAD_EVENTS'])} events)"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229", "#00B4D8", "#29B5E8"],
-        "series": [{
-            "name": "Events",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_events_donut_chart(df, key_prefix=""):
-    """Render load events donut chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": int(row['LOAD_EVENTS']), "name": f"{row['TARGET_TABLE']} ({int(row['LOAD_EVENTS'])} events)"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229", "#00B4D8", "#29B5E8"],
-        "series": [{
-            "name": "Events",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_events_rose_chart(df, key_prefix=""):
-    """Render load events rose chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": int(row['LOAD_EVENTS']), "name": row['TARGET_TABLE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} events ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666", "#E8A229", "#00B4D8", "#29B5E8"],
-        "series": [{
-            "name": "Events",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
-
-
-def _render_avg_file_size_chart(df, key_prefix=""):
-    """Render average file size chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_avg_file_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_avg_file_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_avg_file_donut_chart(df, key_prefix)
-    else:
-        _render_avg_file_rose_chart(df, key_prefix)
-
-
-def _render_avg_file_bar_chart(df, key_prefix=""):
-    """Render average file size bar chart using Plotly."""
-    plot_df = df.head(10).sort_values('AVG_FILE_MB', ascending=True)
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['TARGET_TABLE'],
-            x=plot_df['AVG_FILE_MB'],
-            orientation='h',
-            marker_color='#27AE60',
-            text=[f"{val:.1f} MB" for val in plot_df['AVG_FILE_MB']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Avg File Size: %{x:.2f} MB<extra></extra>'
-        )
-    ])
-
-    fig.update_layout(
-        height=400,
-        xaxis_title='Average File Size (MB)',
-        yaxis_title='Target Table',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=120, r=50)
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}bar")
-
-
-def _render_avg_file_pie_chart(df, key_prefix=""):
-    """Render average file size pie chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": float(row['AVG_FILE_MB']), "name": f"{row['TARGET_TABLE']} ({row['AVG_FILE_MB']:.1f} MB)"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Avg File Size",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_avg_file_donut_chart(df, key_prefix=""):
-    """Render average file size donut chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": float(row['AVG_FILE_MB']), "name": f"{row['TARGET_TABLE']} ({row['AVG_FILE_MB']:.1f} MB)"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Avg File Size",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_avg_file_rose_chart(df, key_prefix=""):
-    """Render average file size rose chart using ECharts."""
-    plot_df = df.head(10)
-    chart_data = [
-        {"value": float(row['AVG_FILE_MB']), "name": row['TARGET_TABLE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} MB ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Avg File Size",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
-
-
-def _render_health_check_chart(df, key_prefix=""):
-    """Render health check summary chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_health_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_health_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_health_donut_chart(df, key_prefix)
-    else:
-        _render_health_rose_chart(df, key_prefix)
-
-
-def _render_health_bar_chart(df, key_prefix=""):
-    """Render health check bar chart using Plotly."""
-    health_counts = df['HEALTH_CHECK'].value_counts().reset_index()
-    health_counts.columns = ['STATUS', 'COUNT']
-
-    health_counts = health_counts.sort_values('COUNT', ascending=True)
-
-    colors = []
-    for status in health_counts['STATUS']:
-        if '✅' in status:
-            colors.append('#27AE60')
-        else:
-            colors.append('#E74C3C')
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=health_counts['STATUS'],
-            x=health_counts['COUNT'],
-            orientation='h',
-            marker_color=colors,
-            text=[f"{int(val)}" for val in health_counts['COUNT']],
-            textposition='outside',
-            textfont=dict(size=12),
-            hovertemplate='<b>%{y}</b><br>Count: %{x}<extra></extra>'
-        )
-    ])
-
-    fig.update_layout(
-        height=400,
-        xaxis_title='Number of Tables',
-        yaxis_title='Health Status',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}bar")
-
-
-def _render_health_pie_chart(df, key_prefix=""):
-    """Render health check pie chart using ECharts."""
-    health_counts = df['HEALTH_CHECK'].value_counts()
-    chart_data = [
-        {"value": int(count), "name": f"{status} ({count})"}
-        for status, count in health_counts.items()
-    ]
-
-    colors = []
-    for status in health_counts.index:
-        if '✅' in status:
-            colors.append('#27AE60')
-        elif 'High Variance' in status:
-            colors.append('#E74C3C')
-        else:
-            colors.append('#E8A229')
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": colors,
-        "series": [{
-            "name": "Health",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_health_donut_chart(df, key_prefix=""):
-    """Render health check donut chart using ECharts."""
-    health_counts = df['HEALTH_CHECK'].value_counts()
-    chart_data = [
-        {"value": int(count), "name": f"{status} ({count})"}
-        for status, count in health_counts.items()
-    ]
-
-    colors = []
-    for status in health_counts.index:
-        if '✅' in status:
-            colors.append('#27AE60')
-        elif 'High Variance' in status:
-            colors.append('#E74C3C')
-        else:
-            colors.append('#E8A229')
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": colors,
-        "series": [{
-            "name": "Health",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_health_rose_chart(df, key_prefix=""):
-    """Render health check rose chart using ECharts."""
-    health_counts = df['HEALTH_CHECK'].value_counts()
-    chart_data = [
-        {"value": int(count), "name": status}
-        for status, count in health_counts.items()
-    ]
-
-    colors = []
-    for status in health_counts.index:
-        if '✅' in status:
-            colors.append('#27AE60')
-        elif 'High Variance' in status:
-            colors.append('#E74C3C')
-        else:
-            colors.append('#E8A229')
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} tables ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": colors,
-        "series": [{
-            "name": "Health",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown(f"**{table_title}**")
+    valid_cols = [c for c in table_cols if c in df.columns]
+    st.dataframe(df[valid_cols], use_container_width=True)

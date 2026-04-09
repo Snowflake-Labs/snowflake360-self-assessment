@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from concurrent.futures import as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from components.Database_Management._db_queries import ALL_DB_OVERVIEW_QUERIES
 from core.config.design_tokens import (
     BRAND_SECONDARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY_LIGHT, BRAND_ACCENT,
@@ -38,20 +38,24 @@ def _run_query_thread(session, key, sql):
 
 
 def _prefetch_queries(session, queries_dict, progress_bar=None, status_text=None):
-    total = len(queries_dict)
+    needed = {k: sql for k, sql in queries_dict.items() if k not in _query_cache}
+    if not needed:
+        return
+    total = len(needed)
     completed = 0
-    for k, sql in queries_dict.items():
-        key, df, err = _run_query_thread(session, k, sql)
-        _query_cache[key] = df
-        completed += 1
-        if progress_bar is not None:
-            progress_bar.progress(completed / total)
-        if status_text is not None:
-            status_text.text(f"Loading data... ({completed}/{total} queries)")
-    if progress_bar is not None:
-        progress_bar.empty()
-    if status_text is not None:
-        status_text.empty()
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(_run_query_thread, session, k, sql): k
+            for k, sql in needed.items()
+        }
+        for future in as_completed(futures):
+            key, df, err = future.result()
+            _query_cache[key] = df
+            completed += 1
+            if progress_bar is not None:
+                progress_bar.progress(completed / total)
+            if status_text is not None:
+                status_text.text(f"Loading data... ({completed}/{total} queries)")
 
 
 def _no_data_info(msg="No data available."):
@@ -207,9 +211,6 @@ def _render_overview_subtab():
             )
         else:
             _no_data_info("No database storage data found.")
-
-        with st.expander("Potential Savings Summary", expanded=True):
-            _render_potential_savings()
 
     except Exception as e:
         _error_box("Overview tab error", e)
@@ -621,8 +622,17 @@ def _render_high_churn_subtab():
             )
             st.plotly_chart(fig, use_container_width=True)
 
+        st.divider()
+        _render_potential_savings()
+
     except Exception as e:
         _error_box("High Churn Tables tab error", e)
+
+
+def prefetch_db_overview_queries():
+    session = st.session_state.get("session")
+    if session and not _query_cache:
+        _prefetch_queries(session, ALL_DB_OVERVIEW_QUERIES)
 
 
 def comp_db_overview(entry_actions=None):

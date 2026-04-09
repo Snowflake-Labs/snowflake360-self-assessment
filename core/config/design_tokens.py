@@ -81,6 +81,7 @@ BRAND_PRIMARY_DARK = C["brand"]["primary_dark"]
 BRAND_SECONDARY = C["brand"]["secondary"]
 BRAND_SECONDARY_LIGHT = C["brand"]["secondary_light"]
 BRAND_ACCENT = C["brand"]["accent"]
+COLOR_LIGHT = C["brand"]["secondary_light"]
 BRAND_HOVER = C["brand"]["hover"]
 
 SUCCESS = C["semantic"]["success"]

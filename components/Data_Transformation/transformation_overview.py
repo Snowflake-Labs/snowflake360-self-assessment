@@ -2,12 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from concurrent.futures import ThreadPoolExecutor, as_completed
-try:
-    from streamlit_echarts import st_echarts
-except ImportError:
-    def st_echarts(**kwargs):
-        import streamlit as st
-        st.info("Chart unavailable (echarts not supported in SiS)")
 from .problematic_query_report import comp_problematic_query_report
 from .syntax_hunter import comp_syntax_hunter
 from .object_structure_analysis import comp_object_structure_analysis
@@ -336,12 +330,9 @@ CROSS JOIN high_cloud_services hc
             # st.markdown("---")
 
 
-            # Create metric object for dialogs
             # Transpose the data for better display
             display_df = df.T.reset_index()
             display_df.columns = ['METRIC', 'VALUE']
-            # Skip the first two rows (execution_id and account_id)
-            display_df = display_df.iloc[2:].reset_index(drop=True)
 
             # Make the metric names more readable
             metric_names = {
@@ -362,13 +353,15 @@ CROSS JOIN high_cloud_services hc
             }
             display_df['METRIC'] = display_df['METRIC'].apply(lambda x: metric_names.get(x, x))
 
-            # Initialize or update metric object in session state
+            try:
+                clustered = int(df.iloc[0]['CLUSTERED_TABLES'])
+                unclustered = int(df.iloc[0]['UNCLUSTERED_TABLES'])
+                total_row = pd.DataFrame({'METRIC': ['Total Base Tables'], 'VALUE': [clustered + unclustered]})
+                display_df = pd.concat([total_row, display_df], ignore_index=True)
+            except Exception:
+                pass
 
-
-            # Display the dataframe
-            st.dataframe(
-                df,
-            )
+            st.dataframe(display_df, use_container_width=True)
 
             # Charts Section
             # st.markdown("---")
@@ -398,12 +391,6 @@ CROSS JOIN high_cloud_services hc
             with col4.container():
                 st.markdown("##### Query & Usage Patterns (30 Days)")
                 _render_query_patterns_chart(row, key_prefix="query_patterns_")
-
-        with st.expander("Object Lifecycle Listing", expanded=True):
-            _render_object_lifecycle()
-
-        with st.expander("Micro-Transaction Pattern (Short UPSERTs)", expanded=True):
-            _render_micro_transaction_pattern()
 
     except Exception as e:
         st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
@@ -456,128 +443,10 @@ def _render_clustering_bar_chart(row, key_prefix=""):
         showlegend=False,
         margin=dict(t=20, b=50, l=120, r=50)
     )
-
-
-def _render_clustering_pie_chart(row, key_prefix=""):
-    """Render clustering pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['CLUSTERED_TABLES']), "name": f"Clustered ({int(row['CLUSTERED_TABLES'])})"},
-        {"value": int(row['UNCLUSTERED_TABLES']), "name": f"Unclustered ({int(row['UNCLUSTERED_TABLES'])})"},
-        {"value": int(row['NUM_TABLES_WITH_AUTO_CLUSTERING']), "name": f"Auto Clustering ({int(row['NUM_TABLES_WITH_AUTO_CLUSTERING'])})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Clustering",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_clustering_donut_chart(row, key_prefix=""):
-    """Render clustering donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['CLUSTERED_TABLES']), "name": f"Clustered ({int(row['CLUSTERED_TABLES'])})"},
-        {"value": int(row['UNCLUSTERED_TABLES']), "name": f"Unclustered ({int(row['UNCLUSTERED_TABLES'])})"},
-        {"value": int(row['NUM_TABLES_WITH_AUTO_CLUSTERING']), "name": f"Auto Clustering ({int(row['NUM_TABLES_WITH_AUTO_CLUSTERING'])})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Clustering",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_clustering_rose_chart(row, key_prefix=""):
-    """Render clustering rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['CLUSTERED_TABLES']), "name": "Clustered Tables"},
-        {"value": int(row['UNCLUSTERED_TABLES']), "name": "Unclustered Tables"},
-        {"value": int(row['NUM_TABLES_WITH_AUTO_CLUSTERING']), "name": "Auto Clustering"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Clustering",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_object_lifecycle():
-    import plotly.graph_objects as go
     st.markdown(
         '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
         'ℹ️&nbsp;&nbsp;<b>Object Lifecycle:</b> Tables grouped by age (since creation) and type. '
@@ -626,7 +495,6 @@ def _render_object_lifecycle():
 
 
 def _render_micro_transaction_pattern():
-    import plotly.graph_objects as go
     st.markdown(
         '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
         'ℹ️&nbsp;&nbsp;<b>Micro-Transaction Pattern:</b> Short UPSERT/MERGE operations (execution <500ms) '
@@ -704,7 +572,7 @@ def _render_table_types_bar_chart(row, key_prefix=""):
             y=categories_sorted,
             x=values_sorted,
             orientation='h',
-            marker_color='#E8A229',
+            marker_color='#11567F',
             text=[f"{int(val)}" for val in values_sorted],
             textposition='outside',
             textfont=dict(size=10),
@@ -719,136 +587,7 @@ def _render_table_types_bar_chart(row, key_prefix=""):
         showlegend=False,
         margin=dict(t=20, b=50, l=150, r=50)
     )
-
-
-def _render_table_types_pie_chart(row, key_prefix=""):
-    """Render table types pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_MATERIALIZED_VIEWS']), "name": f"Materialized Views ({int(row['NUM_MATERIALIZED_VIEWS'])})"},
-        {"value": int(row['NUM_TABLES_WITH_SEMI_STRUCTURED']), "name": f"Semi-Structured ({int(row['NUM_TABLES_WITH_SEMI_STRUCTURED'])})"},
-        {"value": int(row['NUM_DYNAMIC_TABLES']), "name": f"Dynamic Tables ({int(row['NUM_DYNAMIC_TABLES'])})"},
-        {"value": int(row['NUM_HYBRID_TABLES']), "name": f"Hybrid Tables ({int(row['NUM_HYBRID_TABLES'])})"},
-        {"value": int(row['NUM_EVENT_TABLES']), "name": f"Event Tables ({int(row['NUM_EVENT_TABLES'])})"},
-        {"value": int(row['NUM_SEMANTIC_VIEWS']), "name": f"Semantic Views ({int(row['NUM_SEMANTIC_VIEWS'])})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#0077B6", "#F39C12", "#0077B6", "#11567F", "#75C2D8"],
-        "series": [{
-            "name": "Table Types",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_table_types_donut_chart(row, key_prefix=""):
-    """Render table types donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_MATERIALIZED_VIEWS']), "name": f"Materialized Views ({int(row['NUM_MATERIALIZED_VIEWS'])})"},
-        {"value": int(row['NUM_TABLES_WITH_SEMI_STRUCTURED']), "name": f"Semi-Structured ({int(row['NUM_TABLES_WITH_SEMI_STRUCTURED'])})"},
-        {"value": int(row['NUM_DYNAMIC_TABLES']), "name": f"Dynamic Tables ({int(row['NUM_DYNAMIC_TABLES'])})"},
-        {"value": int(row['NUM_HYBRID_TABLES']), "name": f"Hybrid Tables ({int(row['NUM_HYBRID_TABLES'])})"},
-        {"value": int(row['NUM_EVENT_TABLES']), "name": f"Event Tables ({int(row['NUM_EVENT_TABLES'])})"},
-        {"value": int(row['NUM_SEMANTIC_VIEWS']), "name": f"Semantic Views ({int(row['NUM_SEMANTIC_VIEWS'])})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#0077B6", "#F39C12", "#0077B6", "#11567F", "#75C2D8"],
-        "series": [{
-            "name": "Table Types",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_table_types_rose_chart(row, key_prefix=""):
-    """Render table types rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_MATERIALIZED_VIEWS']), "name": "Materialized Views"},
-        {"value": int(row['NUM_TABLES_WITH_SEMI_STRUCTURED']), "name": "Semi-Structured"},
-        {"value": int(row['NUM_DYNAMIC_TABLES']), "name": "Dynamic Tables"},
-        {"value": int(row['NUM_HYBRID_TABLES']), "name": "Hybrid Tables"},
-        {"value": int(row['NUM_EVENT_TABLES']), "name": "Event Tables"},
-        {"value": int(row['NUM_SEMANTIC_VIEWS']), "name": "Semantic Views"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#0077B6", "#F39C12", "#0077B6", "#11567F", "#75C2D8"],
-        "series": [{
-            "name": "Table Types",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_warehouse_issues_chart(row, key_prefix=""):
@@ -876,7 +615,7 @@ def _render_warehouse_issues_bar_chart(row, key_prefix=""):
             y=categories_sorted,
             x=values_sorted,
             orientation='h',
-            marker_color='#F39C12',
+            marker_color='#E8A229',
             text=[f"{int(val)}" for val in values_sorted],
             textposition='outside',
             textfont=dict(size=10),
@@ -891,124 +630,7 @@ def _render_warehouse_issues_bar_chart(row, key_prefix=""):
         showlegend=False,
         margin=dict(t=20, b=50, l=160, r=50)
     )
-
-
-def _render_warehouse_issues_pie_chart(row, key_prefix=""):
-    """Render warehouse issues pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D']), "name": f"WH with Spill/Queue ({int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D'])})"},
-        {"value": int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D']), "name": f"High Cloud Services Days ({int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D'])})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#F39C12", "#F39C12"],
-        "series": [{
-            "name": "WH Issues",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_warehouse_issues_donut_chart(row, key_prefix=""):
-    """Render warehouse issues donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D']), "name": f"WH with Spill/Queue ({int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D'])})"},
-        {"value": int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D']), "name": f"High Cloud Services Days ({int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D'])})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#F39C12", "#F39C12"],
-        "series": [{
-            "name": "WH Issues",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_warehouse_issues_rose_chart(row, key_prefix=""):
-    """Render warehouse issues rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_WAREHOUSES_SPILL_OR_QUEUE_LAST_30D']), "name": "WH with Spill/Queue"},
-        {"value": int(row['NUM_WH_DAYS_HIGH_CLOUD_SERVICES_LAST_30D']), "name": "High Cloud Services Days"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#F39C12", "#F39C12"],
-        "series": [{
-            "name": "WH Issues",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_query_patterns_chart(row, key_prefix=""):
@@ -1036,7 +658,7 @@ def _render_query_patterns_bar_chart(row, key_prefix=""):
             y=categories_sorted,
             x=values_sorted,
             orientation='h',
-            marker_color='#0077B6',
+            marker_color='#75C2D8',
             text=[f"{int(val):,}" for val in values_sorted],
             textposition='outside',
             textfont=dict(size=10),
@@ -1051,121 +673,7 @@ def _render_query_patterns_bar_chart(row, key_prefix=""):
         showlegend=False,
         margin=dict(t=20, b=50, l=120, r=50)
     )
+    st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_query_patterns_pie_chart(row, key_prefix=""):
-    """Render query patterns pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_SHORT_UPSERTS_LAST_30D']), "name": f"Short UPSERTs ({int(row['NUM_SHORT_UPSERTS_LAST_30D']):,})"},
-        {"value": int(row['NUM_SNOWPARK_QUERIES_LAST_30D']), "name": f"Snowpark Queries ({int(row['NUM_SNOWPARK_QUERIES_LAST_30D']):,})"}
-    ]
 
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Query Patterns",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_query_patterns_donut_chart(row, key_prefix=""):
-    """Render query patterns donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_SHORT_UPSERTS_LAST_30D']), "name": f"Short UPSERTs ({int(row['NUM_SHORT_UPSERTS_LAST_30D']):,})"},
-        {"value": int(row['NUM_SNOWPARK_QUERIES_LAST_30D']), "name": f"Snowpark Queries ({int(row['NUM_SNOWPARK_QUERIES_LAST_30D']):,})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Query Patterns",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_query_patterns_rose_chart(row, key_prefix=""):
-    """Render query patterns rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['NUM_SHORT_UPSERTS_LAST_30D']), "name": "Short UPSERTs"},
-        {"value": int(row['NUM_SNOWPARK_QUERIES_LAST_30D']), "name": "Snowpark Queries"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Query Patterns",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")

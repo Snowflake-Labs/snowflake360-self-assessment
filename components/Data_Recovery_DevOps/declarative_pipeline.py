@@ -1,12 +1,81 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-try:
-    from streamlit_echarts import st_echarts
-except ImportError:
-    def st_echarts(**kwargs):
-        import streamlit as st
-        st.info("Chart unavailable (echarts not supported in SiS)")
+
+_C1 = '#29B5E8'
+_C2 = '#11567F'
+_C3 = '#75C2D8'
+_CA = '#E8A229'
+
+_SQL_ORCHESTRATION = """
+WITH dt_usage AS (
+    SELECT
+        'Dynamic Tables (Declarative)' AS orchestration_type,
+        COUNT(*) AS activity_count,
+        COUNT(DISTINCT name) AS distinct_objects
+    FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY
+    WHERE data_timestamp >= DATEADD('day', -7, CURRENT_TIMESTAMP())
+),
+task_usage AS (
+    SELECT
+        'Tasks (Imperative)' AS orchestration_type,
+        COUNT(*) AS activity_count,
+        COUNT(DISTINCT name) AS distinct_objects
+    FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY
+    WHERE scheduled_time >= DATEADD('day', -7, CURRENT_TIMESTAMP())
+),
+combined AS (
+    SELECT * FROM dt_usage
+    UNION ALL
+    SELECT * FROM task_usage
+)
+SELECT
+    orchestration_type,
+    activity_count,
+    distinct_objects,
+    CASE
+        WHEN orchestration_type LIKE '%Dynamic%' AND activity_count > 0 THEN 'Using Modern Declarative Pattern'
+        WHEN orchestration_type LIKE '%Task%' AND activity_count > 0 THEN 'Using Traditional Imperative Pattern'
+        ELSE 'No Activity'
+    END AS pattern_assessment
+FROM combined
+ORDER BY activity_count DESC
+"""
+
+_SQL_DT_INVENTORY = """
+SELECT
+    COUNT(*) AS dt_count,
+    COUNT(DISTINCT table_catalog) AS db_count,
+    COUNT(DISTINCT table_schema) AS schema_count
+FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+WHERE table_type = 'DYNAMIC TABLE' AND deleted IS NULL
+"""
+
+_SQL_DT_REFRESH_STATS = """
+SELECT
+    COUNT(*) AS refresh_count,
+    AVG(TIMESTAMPDIFF('minute', refresh_start_time, refresh_end_time)) AS avg_lag_min
+FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY
+WHERE data_timestamp >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+"""
+
+_SQL_DT_DAILY_REFRESH = """
+SELECT
+    TO_DATE(data_timestamp) AS refresh_date,
+    SUM(CASE WHEN state = 'SUCCEEDED' THEN 1 ELSE 0 END) AS success,
+    SUM(CASE WHEN state != 'SUCCEEDED' THEN 1 ELSE 0 END) AS failures
+FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY
+WHERE data_timestamp >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+GROUP BY refresh_date
+ORDER BY refresh_date
+"""
+
+_ALL_ORCH_QUERIES = {
+    "rd_orchestration": _SQL_ORCHESTRATION,
+    "rd_dt_inventory": _SQL_DT_INVENTORY,
+    "rd_dt_refresh_stats": _SQL_DT_REFRESH_STATS,
+    "rd_dt_daily_refresh": _SQL_DT_DAILY_REFRESH,
+}
 
 
 def _cached_sql(cache_key, sql):
@@ -24,453 +93,104 @@ def _cached_sql(cache_key, sql):
 
 
 def comp_declarative_pipeline(entry_actions=None):
-    """Declarative Pipeline Adoption (Dynamic Tables) Component
-
-    Analyzes orchestration pattern comparison showing activity counts for
-    declarative Dynamic Tables vs imperative Tasks over last 7 days.
-
-    Args:
-        entry_actions: Optional entry actions for the component
-    """
     try:
-        # Get session and context
-        try:
-            from snowflake.snowpark.context import get_active_session
-            session = get_active_session()
-        except Exception as e:
-            st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        f'🛑&nbsp;&nbsp;Unable to get Snowflake session: {str(e)}'
-                        f'</div>', unsafe_allow_html=True)
-            return
+        st.markdown("### Declarative vs Imperative Orchestration (7d)")
 
-        if not session:
-            st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                        '⚠️&nbsp;&nbsp;Snowflake session not available.'
-                        '</div>', unsafe_allow_html=True)
-            return
+        df = _cached_sql("rd_orchestration", _SQL_ORCHESTRATION)
 
-        # Orchestration Pattern Comparison expander
-        with st.expander("Orchestration Pattern Comparison", expanded=True):
-            # Introduction text (no CSS styling)
-            st.markdown("Orchestration pattern comparison showing activity counts for declarative Dynamic Tables vs imperative Tasks over last 7 days.")
-            st.markdown("<br>", unsafe_allow_html=True)
+        if df.empty:
+            st.markdown(
+                '<div style="background-color:#fff3cd;border-left:6px solid #ffc107;padding:10px;">'
+                '⚠️&nbsp;&nbsp;No orchestration pattern data found for the last 7 days.</div>',
+                unsafe_allow_html=True)
+        else:
+            df.columns = ['ORCHESTRATION_TYPE', 'ACTIVITY_COUNT', 'DISTINCT_OBJECTS', 'PATTERN_ASSESSMENT']
 
-            # Build and execute the query
-            query = f"""
-            WITH dt_usage AS (
-                SELECT 'Dynamic Tables (Declarative)' AS type, COUNT(*) as activity_count
-                FROM SNOWFLAKE.ACCOUNT_USAGE.dynamic_table_refresh_history
-                WHERE data_timestamp >= DATEADD('day', -7, CURRENT_TIMESTAMP())
-            ),
-            task_usage AS (
-                SELECT 'Tasks (Imperative)' AS type, COUNT(*) as activity_count
-                FROM SNOWFLAKE.ACCOUNT_USAGE.task_history
-                WHERE scheduled_time >= DATEADD('day', -7, CURRENT_TIMESTAMP())
-            ),
-            aggr AS (
-                SELECT * FROM dt_usage
-                UNION ALL
-                SELECT * FROM task_usage
-            )
-            SELECT
-                a.*
-            FROM aggr a
-            """
+            col_l, col_r = st.columns(2)
+            with col_l:
+                st.markdown("**Orchestration Activity Count**")
+                plot_df = df.sort_values('ACTIVITY_COUNT', ascending=True)
+                fig = go.Figure(go.Bar(
+                    y=plot_df['ORCHESTRATION_TYPE'], x=plot_df['ACTIVITY_COUNT'],
+                    orientation='h', marker_color=_C1,
+                    text=[f"{int(v):,}" for v in plot_df['ACTIVITY_COUNT']],
+                    textposition='outside',
+                    hovertemplate='<b>%{y}</b><br>Activity Count: %{x:,}<extra></extra>'
+                ))
+                fig.update_layout(height=350, xaxis_title='Activity Count', showlegend=False,
+                                  margin=dict(t=20, b=50, l=220, r=50))
+                st.plotly_chart(fig, use_container_width=True, key="orch_activity_bar")
 
+            with col_r:
+                st.markdown("**Distinct Orchestrated Objects**")
+                colors = [_C1, _C2][:len(df)]
+                fig = go.Figure(go.Pie(
+                    labels=df['ORCHESTRATION_TYPE'], values=df['ACTIVITY_COUNT'],
+                    hole=0.45, marker=dict(colors=colors),
+                    textinfo='label+percent', textposition='outside',
+                    hovertemplate='<b>%{label}</b><br>Count: %{value:,}<br>%{percent}<extra></extra>'
+                ))
+                fig.update_layout(height=350, showlegend=True,
+                                  legend=dict(orientation='h', y=-0.15, x=0.5, xanchor='center'),
+                                  margin=dict(t=20, b=60, l=20, r=20))
+                st.plotly_chart(fig, use_container_width=True, key="orch_objects_donut")
 
-            # Execute query
-            try:
-                df = _cached_sql("rd_declarative_pipeline", query)
-            except Exception as e:
-                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                            f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
-                            f'</div>', unsafe_allow_html=True)
-                return
+            st.dataframe(df, use_container_width=True)
 
-            if df.empty:
-                st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                            '⚠️&nbsp;&nbsp;No orchestration pattern data found for the last 7 days.'
-                            '</div>', unsafe_allow_html=True)
-                return
+        st.markdown("---")
 
-            # Rename columns for display
-            df.columns = ['ORCHESTRATION_TYPE', 'ACTIVITY_COUNT']
+        inv_df = _cached_sql("rd_dt_inventory", _SQL_DT_INVENTORY)
+        ref_df = _cached_sql("rd_dt_refresh_stats", _SQL_DT_REFRESH_STATS)
 
+        dt_count = int(inv_df.iloc[0, 0]) if not inv_df.empty and inv_df.iloc[0, 0] else 0
+        db_count = int(inv_df.iloc[0, 1]) if not inv_df.empty and inv_df.iloc[0, 1] else 0
+        schema_count = int(inv_df.iloc[0, 2]) if not inv_df.empty and inv_df.iloc[0, 2] else 0
+        refresh_count = int(ref_df.iloc[0, 0]) if not ref_df.empty and ref_df.iloc[0, 0] else 0
+        avg_lag = round(float(ref_df.iloc[0, 1]), 1) if not ref_df.empty and ref_df.iloc[0, 1] else 0.0
 
-            # Create metric object for dialogs
-            # Initialize or update metric object in session state
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Dynamic Tables", f"{dt_count:,}")
+        c2.metric("Databases", str(db_count))
+        c3.metric("Schemas", str(schema_count))
+        c4.metric("Refreshes (30d)", f"{refresh_count:,}")
+        c5.metric("Avg Lag (min)", str(avg_lag))
 
+        st.markdown("")
 
-            # Display the dataframe
-            st.dataframe(
-                df,
-            )
+        if refresh_count == 0:
+            lc, rc = st.columns(2)
+            with lc:
+                st.markdown(
+                    '<div style="background-color:#fff3cd;border-left:6px solid #ffc107;padding:10px;">'
+                    '⚠️&nbsp;&nbsp;No refresh history found.</div>',
+                    unsafe_allow_html=True)
+            with rc:
+                st.markdown(
+                    '<div style="background-color:#fff3cd;border-left:6px solid #ffc107;padding:10px;">'
+                    '⚠️&nbsp;&nbsp;No refresh outcome data.</div>',
+                    unsafe_allow_html=True)
 
-            # Charts Section - 2 charts per row
-            st.markdown("---")
-            st.markdown("#### Orchestration Analytics Charts")
-
-            # Row 1: Two charts
-            col1, col2 = st.columns(2)
-
-            with col1.container():
-                st.markdown("##### Activity Count by Orchestration Type")
-                _render_activity_count_chart(df, key_prefix="activity_")
-
-            with col2.container():
-                st.markdown("##### Declarative vs Imperative Distribution")
-                _render_distribution_chart(df, key_prefix="dist_")
+        st.markdown("**Daily Refresh Trend (30d)**")
+        trend_df = _cached_sql("rd_dt_daily_refresh", _SQL_DT_DAILY_REFRESH)
+        if not trend_df.empty:
+            trend_df.columns = ['REFRESH_DATE', 'SUCCESS', 'FAILURES']
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                name='Failures', x=trend_df['REFRESH_DATE'], y=trend_df['FAILURES'],
+                marker_color=_CA
+            ))
+            fig.add_trace(go.Bar(
+                name='Success', x=trend_df['REFRESH_DATE'], y=trend_df['SUCCESS'],
+                marker_color=_C1
+            ))
+            fig.update_layout(barmode='stack', height=400,
+                              legend=dict(orientation='h', y=-0.15, x=0.5, xanchor='center'),
+                              margin=dict(t=20, b=60, l=50, r=50))
+            st.plotly_chart(fig, use_container_width=True, key="dt_daily_trend")
+        else:
+            st.info("No daily refresh data available.")
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
-                    f'</div>', unsafe_allow_html=True)
-
-
-# ============================
-# Chart Type Selector & Charts for Activity Count
-# ============================
-
-def _render_activity_count_chart(df, key_prefix=""):
-    """Render activity count by orchestration type chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_activity_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_activity_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_activity_donut_chart(df, key_prefix)
-    else:
-        _render_activity_rose_chart(df, key_prefix)
-
-
-def _render_activity_bar_chart(df, key_prefix=""):
-    """Render activity count bar chart using Plotly."""
-    # Sort ascending for horizontal bar layout
-    plot_df = df.sort_values('ACTIVITY_COUNT', ascending=True)
-
-    # Define colors for declarative vs imperative
-    colors = ['#0077B6' if 'Declarative' in t else '#29B5E8' for t in plot_df['ORCHESTRATION_TYPE']]
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['ORCHESTRATION_TYPE'],
-            x=plot_df['ACTIVITY_COUNT'],
-            orientation='h',
-            marker_color=colors,
-            text=[f"{int(val):,}" for val in plot_df['ACTIVITY_COUNT']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Activity Count: %{x:,}<extra></extra>'
-        )
-    ])
-
-    fig.update_layout(
-        height=400,
-        xaxis_title='Activity Count',
-        yaxis_title='Orchestration Type',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
-    )
-
-
-def _render_activity_pie_chart(df, key_prefix=""):
-    """Render activity count pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['ACTIVITY_COUNT']), "name": f"{row['ORCHESTRATION_TYPE']} ({int(row['ACTIVITY_COUNT']):,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#29B5E8"],
-        "series": [{
-            "name": "Activity Count",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_activity_donut_chart(df, key_prefix=""):
-    """Render activity count donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['ACTIVITY_COUNT']), "name": f"{row['ORCHESTRATION_TYPE']} ({int(row['ACTIVITY_COUNT']):,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#29B5E8"],
-        "series": [{
-            "name": "Activity Count",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_activity_rose_chart(df, key_prefix=""):
-    """Render activity count rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['ACTIVITY_COUNT']), "name": row['ORCHESTRATION_TYPE']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} activities ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#29B5E8"],
-        "series": [{
-            "name": "Activity Count",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
-
-
-# ============================
-# Chart Type Selector & Charts for Distribution
-# ============================
-
-def _render_distribution_chart(df, key_prefix=""):
-    """Render distribution chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_dist_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_dist_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_dist_donut_chart(df, key_prefix)
-    else:
-        _render_dist_rose_chart(df, key_prefix)
-
-
-def _render_dist_bar_chart(df, key_prefix=""):
-    """Render distribution bar chart using Plotly."""
-    # Calculate percentages
-    total = df['ACTIVITY_COUNT'].sum()
-    plot_df = df.copy()
-    plot_df['PERCENTAGE'] = (plot_df['ACTIVITY_COUNT'] / total * 100).round(1)
-    plot_df = plot_df.sort_values('PERCENTAGE', ascending=True)
-
-    # Define colors for declarative vs imperative
-    colors = ['#0077B6' if 'Declarative' in t else '#29B5E8' for t in plot_df['ORCHESTRATION_TYPE']]
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['ORCHESTRATION_TYPE'],
-            x=plot_df['PERCENTAGE'],
-            orientation='h',
-            marker_color=colors,
-            text=[f"{val:.1f}%" for val in plot_df['PERCENTAGE']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Percentage: %{x:.1f}%<extra></extra>'
-        )
-    ])
-
-    fig.update_layout(
-        height=400,
-        xaxis_title='Percentage (%)',
-        yaxis_title='Orchestration Type',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
-    )
-
-
-def _render_dist_pie_chart(df, key_prefix=""):
-    """Render distribution pie chart using ECharts."""
-    total = df['ACTIVITY_COUNT'].sum()
-    chart_data = [
-        {"value": int(row['ACTIVITY_COUNT']), "name": f"{row['ORCHESTRATION_TYPE']} ({row['ACTIVITY_COUNT']/total*100:.1f}%)"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#29B5E8"],
-        "series": [{
-            "name": "Distribution",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "label": {"formatter": "{d}%"},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_dist_donut_chart(df, key_prefix=""):
-    """Render distribution donut chart using ECharts."""
-    total = df['ACTIVITY_COUNT'].sum()
-    chart_data = [
-        {"value": int(row['ACTIVITY_COUNT']), "name": f"{row['ORCHESTRATION_TYPE']} ({row['ACTIVITY_COUNT']/total*100:.1f}%)"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#29B5E8"],
-        "series": [{
-            "name": "Distribution",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "label": {"formatter": "{d}%"},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_dist_rose_chart(df, key_prefix=""):
-    """Render distribution rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['ACTIVITY_COUNT']), "name": row['ORCHESTRATION_TYPE']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#29B5E8"],
-        "series": [{
-            "name": "Distribution",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+        st.markdown(
+            f'<div style="background-color:#FDEDEC;border-left:6px solid {_CA};padding:10px;">'
+            f'Error: {str(e)}</div>', unsafe_allow_html=True)

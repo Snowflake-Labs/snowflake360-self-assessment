@@ -2,7 +2,7 @@ _ALL_AC_QUERIES = {
     "auth_role_hygiene": """
         WITH system_roles AS (
             SELECT 'ACCOUNTADMIN' AS name UNION ALL SELECT 'SYSADMIN' UNION ALL
-            SELECT 'SECURITYADMIN' UNION ALL SELECT 'USERADMIN' UNION ALL SELECT 'PUBLIC'
+            SELECT 'SECURITYADMIN' UNION ALL SELECT 'USERADMIN' UNION ALL SELECT 'PUBLIC' UNION ALL SELECT 'ORGADMIN'
         ),
         role_hierarchy AS (
             SELECT
@@ -66,6 +66,12 @@ _ALL_AC_QUERIES = {
             ud.type AS user_type, ud.default_role, ud.last_success_login,
             DATEDIFF('day', ud.last_success_login, CURRENT_TIMESTAMP()) AS days_since_login,
             CASE
+                WHEN ud.has_password = 'true' AND COALESCE(ud.ext_authn_duo, 'false') = 'false' THEN 'NO_MFA'
+                WHEN ud.has_password = 'true' AND ud.ext_authn_duo = 'true' THEN 'MFA_ENABLED'
+                WHEN ud.has_rsa_public_key = 'true' THEN 'KEYPAIR'
+                ELSE 'OTHER'
+            END AS auth_method,
+            CASE
                 WHEN ud.default_role = 'ACCOUNTADMIN' THEN 'CRITICAL'
                 WHEN ud.has_password = 'true' AND COALESCE(ud.ext_authn_duo, 'false') = 'false' THEN 'HIGH'
                 WHEN DATEDIFF('day', ud.last_success_login, CURRENT_TIMESTAMP()) > 90 THEN 'MODERATE'
@@ -91,7 +97,13 @@ _ALL_AC_QUERIES = {
                 WHEN COUNT(*) > 100 THEN 'HIGH'
                 WHEN COUNT(*) > 25 THEN 'MODERATE'
                 ELSE 'LOW'
-            END AS grant_concentration
+            END AS grant_concentration,
+            CASE
+                WHEN COUNT(CASE WHEN privilege IN ('ALL', 'ALL PRIVILEGES') THEN 1 END) > 0 THEN 'Review ALL PRIVILEGES grants'
+                WHEN COUNT(CASE WHEN privilege = 'OWNERSHIP' THEN 1 END) > 50 THEN 'Consider splitting role responsibilities'
+                WHEN COUNT(*) > 100 THEN 'Consider more granular role structure'
+                ELSE 'Acceptable'
+            END AS recommendation
         FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
         WHERE deleted_on IS NULL
           AND grantee_name NOT IN ('ACCOUNTADMIN', 'SYSADMIN', 'SECURITYADMIN', 'USERADMIN', 'PUBLIC')
@@ -115,12 +127,14 @@ _ALL_AC_QUERIES = {
         )
         SELECT
             COUNT(*) AS total_users,
-            COUNT(CASE WHEN type = 'PERSON' OR type IS NULL THEN 1 END) AS type_person_count,
-            COUNT(CASE WHEN type = 'SERVICE' OR type = 'LEGACY_SERVICE' THEN 1 END) AS type_service_count,
+            COUNT(CASE WHEN type = 'PERSON' OR type IS NULL THEN 1 END) AS person_users,
+            COUNT(CASE WHEN type = 'SERVICE' THEN 1 END) AS service_users,
+            COUNT(CASE WHEN type = 'LEGACY_SERVICE' THEN 1 END) AS legacy_service_users,
             COUNT(CASE WHEN last_success_login > DATEADD('day', -60, CURRENT_TIMESTAMP()) THEN 1 END) AS active_users_60d,
             COUNT(CASE WHEN last_success_login <= DATEADD('day', -60, CURRENT_TIMESTAMP()) OR last_success_login IS NULL THEN 1 END) AS inactive_users,
-            ROUND(AVG(ug.role_count), 1) AS avg_roles_per_user,
-            (SELECT ROUND(AVG(user_count), 1) FROM role_grants) AS avg_users_per_role
+            ROUND(AVG(COALESCE(ug.role_count, 0)), 1) AS avg_roles_per_user,
+            (SELECT ROUND(AVG(user_count), 1) FROM role_grants) AS avg_users_per_role,
+            MAX(COALESCE(ug.role_count, 0)) AS max_roles_single_user
         FROM SNOWFLAKE.ACCOUNT_USAGE.USERS u
         LEFT JOIN user_grants ug ON u.name = ug.user_name
         WHERE u.deleted_on IS NULL
@@ -159,7 +173,19 @@ _ALL_AC_QUERIES = {
         SELECT
             grantee_name AS role_owner,
             granted_on AS object_type,
-            COUNT(*) AS object_count
+            COUNT(*) AS object_count,
+            CASE
+                WHEN COUNT(*) > 100 THEN 'HIGH_CONCENTRATION'
+                WHEN COUNT(*) > 25 THEN 'MODERATE_CONCENTRATION'
+                ELSE 'LOW'
+            END AS status,
+            CASE
+                WHEN grantee_name = 'ACCOUNTADMIN' AND COUNT(*) > 10
+                THEN 'Transfer ownership to appropriate functional roles'
+                WHEN grantee_name = 'SYSADMIN' AND COUNT(*) > 50
+                THEN 'Consider delegating to database-specific roles'
+                ELSE 'Acceptable'
+            END AS recommendation
         FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
         WHERE deleted_on IS NULL
           AND privilege = 'OWNERSHIP'
@@ -175,8 +201,10 @@ SELECT
     reported_client_type AS client_type,
     COUNT(*) AS login_attempts,
     COUNT(DISTINCT client_ip) AS unique_ips,
+    COUNT(DISTINCT user_name) AS unique_users,
     MIN(event_timestamp) AS first_seen,
-    MAX(event_timestamp) AS last_seen
+    MAX(event_timestamp) AS last_seen,
+    ROUND(COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER(), 0), 1) AS pct_of_total
 FROM SNOWFLAKE.ACCOUNT_USAGE.LOGIN_HISTORY
 WHERE event_timestamp >= DATEADD('day', -30, CURRENT_TIMESTAMP())
 GROUP BY ALL
@@ -185,9 +213,9 @@ ORDER BY login_attempts DESC
     "authn_credential_hygiene": """
 SELECT
     CASE
-        WHEN has_password = 'YES' AND ext_authn_duo = 'TRUE' THEN 'Password + MFA (Secure)'
-        WHEN has_password = 'YES' AND ext_authn_duo = 'FALSE' THEN 'Password Only (Risky)'
-        WHEN has_rsa_public_key = 'YES' THEN 'Keypair User'
+        WHEN has_password = 'YES' AND ext_authn_duo = 'TRUE' THEN 'Password + MFA'
+        WHEN has_password = 'YES' AND ext_authn_duo = 'FALSE' THEN 'Password Only'
+        WHEN has_rsa_public_key = 'YES' THEN 'Keypair'
         ELSE 'SSO/Federated'
     END AS auth_profile,
     COUNT(*) AS user_count,
@@ -195,31 +223,63 @@ SELECT
         WHEN has_rsa_public_key = 'YES'
              AND (last_success_login < DATEADD('day', -180, CURRENT_TIMESTAMP()) OR last_success_login IS NULL)
         THEN 1
-    END) AS inactive_keypair_users
+    END) AS inactive_keypair_users,
+    ROUND(COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER(), 0), 1) AS pct_of_users,
+    CASE
+        WHEN has_password = 'YES' AND ext_authn_duo = 'FALSE' THEN 'HIGH_RISK'
+        WHEN has_rsa_public_key = 'YES' AND COUNT(CASE WHEN has_rsa_public_key = 'YES' AND (last_success_login < DATEADD('day', -180, CURRENT_TIMESTAMP()) OR last_success_login IS NULL) THEN 1 END) > 0 THEN 'MODERATE_RISK'
+        ELSE 'LOW_RISK'
+    END AS risk_level,
+    CASE
+        WHEN has_password = 'YES' AND ext_authn_duo = 'FALSE' THEN 'Enable MFA for these users'
+        WHEN COUNT(CASE WHEN has_rsa_public_key = 'YES' AND (last_success_login < DATEADD('day', -180, CURRENT_TIMESTAMP()) OR last_success_login IS NULL) THEN 1 END) > 0 THEN 'Review inactive keypair credentials'
+        ELSE 'Acceptable'
+    END AS recommendation
 FROM SNOWFLAKE.ACCOUNT_USAGE.USERS
 WHERE deleted_on IS NULL
 GROUP BY ALL
 """,
-    "authn_policy_audit": """
+    "authn_password_policies": """
 SELECT
-    'Password Policy' AS policy_type,
     name AS policy_name,
-    password_max_age_days AS max_age,
-    password_min_length AS min_length,
-    password_max_retries AS max_retries,
-    comment
+    database_name AS database,
+    schema_name AS schema,
+    password_max_age_days,
+    password_min_length,
+    password_max_retries,
+    password_lockout_time_mins,
+    password_history,
+    comment,
+    CASE
+        WHEN password_max_age_days > 90 OR password_max_age_days IS NULL THEN 'WEAK'
+        WHEN password_max_age_days > 60 THEN 'MODERATE'
+        ELSE 'STRONG'
+    END AS password_age_rating,
+    CASE
+        WHEN password_min_length < 12 THEN 'WEAK'
+        WHEN password_min_length < 14 THEN 'MODERATE'
+        ELSE 'STRONG'
+    END AS password_length_rating
 FROM SNOWFLAKE.ACCOUNT_USAGE.PASSWORD_POLICIES
 WHERE deleted IS NULL
-
-UNION ALL
-
+""",
+    "authn_session_policies": """
 SELECT
-    'Session Policy',
-    name,
+    name AS policy_name,
+    database_name AS database,
+    schema_name AS schema,
     session_idle_timeout_mins,
     session_ui_idle_timeout_mins,
-    NULL,
-    comment
+    comment,
+    CASE
+        WHEN session_idle_timeout_mins > 60 THEN 'LONG_TIMEOUT'
+        WHEN session_idle_timeout_mins > 30 THEN 'MODERATE_TIMEOUT'
+        ELSE 'SHORT_TIMEOUT'
+    END AS timeout_rating,
+    CASE
+        WHEN session_idle_timeout_mins > 60 THEN 'Consider reducing idle timeout'
+        ELSE 'Acceptable'
+    END AS recommendation
 FROM SNOWFLAKE.ACCOUNT_USAGE.SESSION_POLICIES
 WHERE deleted IS NULL
 """,
@@ -239,18 +299,29 @@ ORDER BY role_count DESC
 """,
     "authn_findings": """
         SELECT
-            SCANNER_NAME,
-            FINDING_TYPE,
-            SEVERITY,
-            STATUS,
-            COUNT(*) AS finding_count,
-            MAX(DETECTED_AT) AS last_detected
+            SCANNER_NAME AS scanner_package,
+            MAX(DETECTED_AT) AS last_scan_run,
+            DATEDIFF('hour', MAX(DETECTED_AT), CURRENT_TIMESTAMP()) AS hours_since_last_scan,
+            COUNT(*) AS total_findings,
+            COUNT(CASE WHEN STATUS = 'OPEN' THEN 1 END) AS open_findings,
+            COUNT(CASE WHEN STATUS = 'RESOLVED' THEN 1 END) AS resolved_findings,
+            COUNT(CASE WHEN STATUS = 'SUPPRESSED' THEN 1 END) AS suppressed_findings,
+            ROUND(COUNT(CASE WHEN STATUS = 'OPEN' THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 1) AS pct_open,
+            CASE
+                WHEN COUNT(CASE WHEN STATUS = 'OPEN' THEN 1 END) > 50 THEN 'CRITICAL'
+                WHEN COUNT(CASE WHEN STATUS = 'OPEN' THEN 1 END) > 20 THEN 'HIGH'
+                WHEN COUNT(CASE WHEN STATUS = 'OPEN' THEN 1 END) > 5 THEN 'MODERATE'
+                WHEN COUNT(CASE WHEN STATUS = 'OPEN' THEN 1 END) > 0 THEN 'LOW'
+                ELSE 'CLEAR'
+            END AS findings_severity,
+            CASE
+                WHEN DATEDIFF('hour', MAX(DETECTED_AT), CURRENT_TIMESTAMP()) > 168 THEN 'STALE (>7 days)'
+                WHEN DATEDIFF('hour', MAX(DETECTED_AT), CURRENT_TIMESTAMP()) > 24 THEN 'RECENT'
+                ELSE 'CURRENT'
+            END AS scan_freshness
         FROM SNOWFLAKE.ACCOUNT_USAGE.TRUST_CENTER_FINDINGS
-        WHERE STATUS != 'RESOLVED'
-        GROUP BY SCANNER_NAME, FINDING_TYPE, SEVERITY, STATUS
-        ORDER BY
-            CASE SEVERITY WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END,
-            finding_count DESC
+        GROUP BY SCANNER_NAME
+        ORDER BY open_findings DESC
         """,
     "ac_pat_users": """
         SELECT
@@ -349,22 +420,82 @@ ORDER BY role_count DESC
             GROUP BY 1
         )
         SELECT
-            nr.name AS "Rule Name",
-            nr.mode AS "Mode (Ingress/Egress)",
-            nr.type AS "Type (IPV4/Host/Link)",
-
+            nr.name AS rule_name,
+            nr.database_name AS database,
+            nr.schema_name AS schema,
+            nr.mode AS rule_mode,
+            nr.type AS rule_type,
             CASE
-                WHEN ru.distinct_policies_using_rule > 0 THEN '✅ Attached'
-                ELSE '⚠️ Unused (Orphan)'
-            END AS "Usage Status",
-
-            COALESCE(ru.distinct_policies_using_rule, 0) AS "Reference Count",
-            nr.owner AS "Owned By",
-            nr.comment AS "Comment"
-
+                WHEN ru.distinct_policies_using_rule > 0 THEN 'ATTACHED'
+                ELSE 'ORPHANED'
+            END AS usage_status,
+            COALESCE(ru.distinct_policies_using_rule, 0) AS reference_count,
+            nr.owner AS owned_by
         FROM SNOWFLAKE.ACCOUNT_USAGE.NETWORK_RULES nr
         LEFT JOIN rule_usage ru ON nr.name = ru.network_rule_name
         WHERE nr.deleted IS NULL
-        ORDER BY "Usage Status" ASC
+        ORDER BY usage_status ASC
+        """,
+    "authn_failure_analysis": """
+        SELECT
+            user_name,
+            error_code,
+            error_message,
+            reported_client_type AS client_type,
+            client_ip,
+            COUNT(*) AS failure_count,
+            MIN(event_timestamp) AS first_failure,
+            MAX(event_timestamp) AS last_failure,
+            CASE
+                WHEN COUNT(*) > 50 THEN 'CRITICAL'
+                WHEN COUNT(*) > 10 THEN 'HIGH'
+                WHEN COUNT(*) > 5 THEN 'MODERATE'
+                ELSE 'LOW'
+            END AS severity
+        FROM SNOWFLAKE.ACCOUNT_USAGE.LOGIN_HISTORY
+        WHERE event_timestamp >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+          AND is_success = 'NO'
+        GROUP BY user_name, error_code, error_message, reported_client_type, client_ip
+        HAVING COUNT(*) > 1
+        ORDER BY failure_count DESC
+        LIMIT 20
+        """,
+    "ac_net_rules_summary": """
+        SELECT
+            COUNT(*) AS total_rules,
+            COUNT(CASE WHEN deleted IS NULL THEN 1 END) AS active_rules,
+            COUNT(CASE WHEN mode = 'INGRESS' AND deleted IS NULL THEN 1 END) AS ingress_rules,
+            COUNT(CASE WHEN mode = 'EGRESS' AND deleted IS NULL THEN 1 END) AS egress_rules
+        FROM SNOWFLAKE.ACCOUNT_USAGE.NETWORK_RULES
+        """,
+    "ac_net_policy_audit": """
+        WITH policy_usage AS (
+            SELECT
+                policy_name,
+                COUNT(CASE WHEN ref_entity_domain = 'ACCOUNT' THEN 1 END) AS applied_to_account,
+                COUNT(CASE WHEN ref_entity_domain = 'USER' THEN 1 END) AS applied_to_users,
+                COUNT(CASE WHEN ref_entity_domain = 'INTEGRATION' THEN 1 END) AS applied_to_integrations
+            FROM SNOWFLAKE.ACCOUNT_USAGE.POLICY_REFERENCES
+            WHERE policy_kind = 'NETWORK_POLICY'
+            GROUP BY 1
+        )
+        SELECT
+            np.name AS policy_name,
+            np.owner,
+            CASE
+                WHEN pu.applied_to_account > 0 THEN 'ENFORCED_ACCOUNT_LEVEL'
+                WHEN pu.applied_to_users > 0 THEN 'ENFORCED_USER_LEVEL'
+                WHEN pu.applied_to_integrations > 0 THEN 'ENFORCED_INTEGRATION'
+                ELSE 'DANGLING_NOT_ENFORCED'
+            END AS enforcement_status,
+            COALESCE(pu.applied_to_account, 0) AS account_attachments,
+            COALESCE(pu.applied_to_users, 0) AS user_attachments,
+            COALESCE(pu.applied_to_integrations, 0) AS integration_attachments,
+            np.created AS created_date,
+            np.comment
+        FROM SNOWFLAKE.ACCOUNT_USAGE.NETWORK_POLICIES np
+        LEFT JOIN policy_usage pu ON np.name = pu.policy_name
+        WHERE np.deleted IS NULL
+        ORDER BY enforcement_status ASC, np.name
         """,
 }

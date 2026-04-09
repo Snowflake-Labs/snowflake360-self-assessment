@@ -1,12 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-try:
-    from streamlit_echarts import st_echarts
-except ImportError:
-    def st_echarts(**kwargs):
-        import streamlit as st
-        st.info("Chart unavailable (echarts not supported in SiS)")
 
 
 def _cached_sql(cache_key, sql):
@@ -52,7 +46,7 @@ def comp_syntax_hunter(entry_actions=None):
         query = f"""
 SELECT
     query_id,
-    query_text,
+    SUBSTR(query_text, 1, 200) AS query_preview,
 
     -- 1. ASOF JOIN
     CASE
@@ -151,7 +145,7 @@ LIMIT 100
                 _render_pattern_usage_chart(pattern_summary, key_prefix="pattern_usage_")
 
             with col2.container():
-                st.markdown("##### Queries by Pattern Type")
+                st.markdown("##### All Patterns (incl. zero)")
                 _render_pattern_queries_chart(pattern_summary, key_prefix="pattern_queries_")
 
             # Row 2: Two charts
@@ -263,7 +257,7 @@ ORDER BY occurrence_count DESC
 
                 # Display the dataframe
                 st.dataframe(
-                    df,
+                    freq_df,
                 )
 
                 # Charts Section
@@ -321,21 +315,7 @@ def _prepare_pattern_summary(df):
 
 def _render_pattern_usage_chart(df, key_prefix=""):
     """Render pattern usage chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_pattern_usage_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_pattern_usage_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_pattern_usage_donut_chart(df, key_prefix)
-    else:
-        _render_pattern_usage_rose_chart(df, key_prefix)
+    _render_pattern_usage_bar_chart(df, key_prefix)
 
 
 def _render_pattern_usage_bar_chart(df, key_prefix=""):
@@ -367,157 +347,12 @@ def _render_pattern_usage_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=150, r=50)
     )
 
-
-def _render_pattern_usage_pie_chart(df, key_prefix=""):
-    """Render pattern usage pie chart using ECharts."""
-    plot_df = df[df['Count'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected in the analyzed queries.")
-        return
-
-    chart_data = [
-        {"value": int(row['Count']), "name": f"{row['Pattern']} ({int(row['Count'])})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Pattern Usage",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_pattern_usage_donut_chart(df, key_prefix=""):
-    """Render pattern usage donut chart using ECharts."""
-    plot_df = df[df['Count'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected in the analyzed queries.")
-        return
-
-    chart_data = [
-        {"value": int(row['Count']), "name": f"{row['Pattern']} ({int(row['Count'])})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Pattern Usage",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_pattern_usage_rose_chart(df, key_prefix=""):
-    """Render pattern usage rose chart using ECharts."""
-    plot_df = df[df['Count'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected in the analyzed queries.")
-        return
-
-    chart_data = [
-        {"value": int(row['Count']), "name": row['Pattern']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Pattern Usage",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_pattern_queries_chart(df, key_prefix=""):
     """Render pattern queries chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_pattern_queries_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_pattern_queries_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_pattern_queries_donut_chart(df, key_prefix)
-    else:
-        _render_pattern_queries_rose_chart(df, key_prefix)
+    _render_pattern_queries_bar_chart(df, key_prefix)
 
 
 def _render_pattern_queries_bar_chart(df, key_prefix=""):
@@ -525,7 +360,7 @@ def _render_pattern_queries_bar_chart(df, key_prefix=""):
     # Show all patterns (including zeros)
     plot_df = df.sort_values('Count', ascending=True)
 
-    colors = ['#27AE60' if val > 0 else '#d3d3d3' for val in plot_df['Count']]
+    colors = '#29B5E8'
 
     fig = go.Figure(data=[
         go.Bar(
@@ -548,497 +383,55 @@ def _render_pattern_queries_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=150, r=50)
     )
 
-
-def _render_pattern_queries_pie_chart(df, key_prefix=""):
-    """Render pattern queries pie chart using ECharts."""
-    plot_df = df[df['Count'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected in the analyzed queries.")
-        return
-
-    chart_data = [
-        {"value": int(row['Count']), "name": f"{row['Pattern']} ({int(row['Count'])})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229"],
-        "series": [{
-            "name": "Pattern Queries",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_pattern_queries_donut_chart(df, key_prefix=""):
-    """Render pattern queries donut chart using ECharts."""
-    plot_df = df[df['Count'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected in the analyzed queries.")
-        return
-
-    chart_data = [
-        {"value": int(row['Count']), "name": f"{row['Pattern']} ({int(row['Count'])})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229"],
-        "series": [{
-            "name": "Pattern Queries",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_pattern_queries_rose_chart(df, key_prefix=""):
-    """Render pattern queries rose chart using ECharts."""
-    plot_df = df[df['Count'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected in the analyzed queries.")
-        return
-
-    chart_data = [
-        {"value": int(row['Count']), "name": row['Pattern']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229"],
-        "series": [{
-            "name": "Pattern Queries",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_distinct_optimization_chart(df, key_prefix=""):
     """Render DISTINCT optimization candidates chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_distinct_opt_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_distinct_opt_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_distinct_opt_donut_chart(df, key_prefix)
-    else:
-        _render_distinct_opt_rose_chart(df, key_prefix)
+    _render_distinct_opt_bar_chart(df, key_prefix)
 
 
 def _render_distinct_opt_bar_chart(df, key_prefix=""):
-    """Render DISTINCT optimization bar chart using Plotly."""
-    # Count candidates vs non-candidates
     candidates = (df['DISTINCT_OPTIMIZATION_CHECK'] == '⚠️ Consider APPROX').sum()
     non_candidates = len(df) - candidates
-
-    categories = ['APPROX Candidates', 'No Optimization Needed']
+    labels = ['APPROX Candidates', 'No Optimisation']
     values = [candidates, non_candidates]
-    colors = ['#E8A229', '#27AE60']
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=categories,
-            x=values,
-            orientation='h',
-            marker_color=colors,
-            text=[f"{int(val)}" for val in values],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Queries: %{x}<extra></extra>'
-        )
-    ])
-
+    colors = ['#E8A229', '#29B5E8']
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values,
+        hole=0.45, marker_colors=colors,
+        textinfo='label+percent', textposition='outside'
+    ))
     fig.update_layout(
-        height=400,
-        xaxis_title='Number of Queries',
-        yaxis_title='',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
+        height=400, showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=-0.35),
+        margin=dict(t=20, b=100, l=20, r=20)
     )
-
-
-def _render_distinct_opt_pie_chart(df, key_prefix=""):
-    """Render DISTINCT optimization pie chart using ECharts."""
-    candidates = (df['DISTINCT_OPTIMIZATION_CHECK'] == '⚠️ Consider APPROX').sum()
-    non_candidates = len(df) - candidates
-
-    chart_data = [
-        {"value": int(candidates), "name": f"⚠️ APPROX Candidates ({candidates})"},
-        {"value": int(non_candidates), "name": f"✅ No Optimization ({non_candidates})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60"],
-        "series": [{
-            "name": "DISTINCT Optimization",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_distinct_opt_donut_chart(df, key_prefix=""):
-    """Render DISTINCT optimization donut chart using ECharts."""
-    candidates = (df['DISTINCT_OPTIMIZATION_CHECK'] == '⚠️ Consider APPROX').sum()
-    non_candidates = len(df) - candidates
-
-    chart_data = [
-        {"value": int(candidates), "name": f"⚠️ APPROX Candidates ({candidates})"},
-        {"value": int(non_candidates), "name": f"✅ No Optimization ({non_candidates})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60"],
-        "series": [{
-            "name": "DISTINCT Optimization",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_distinct_opt_rose_chart(df, key_prefix=""):
-    """Render DISTINCT optimization rose chart using ECharts."""
-    candidates = (df['DISTINCT_OPTIMIZATION_CHECK'] == '⚠️ Consider APPROX').sum()
-    non_candidates = len(df) - candidates
-
-    chart_data = [
-        {"value": int(candidates), "name": "APPROX Candidates"},
-        {"value": int(non_candidates), "name": "No Optimization"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60"],
-        "series": [{
-            "name": "DISTINCT Optimization",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_pattern_summary_chart(df, key_prefix=""):
     """Render pattern summary chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_pattern_sum_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_pattern_sum_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_pattern_sum_donut_chart(df, key_prefix)
-    else:
-        _render_pattern_sum_rose_chart(df, key_prefix)
+    _render_pattern_sum_bar_chart(df, key_prefix)
 
 
 def _render_pattern_sum_bar_chart(df, key_prefix=""):
-    """Render pattern summary bar chart using Plotly."""
-    # Categorize patterns
-    detected = df[df['Count'] > 0]['Count'].sum()
-    not_detected = df[df['Count'] == 0].shape[0]
-
-    categories = ['Patterns Detected', 'Patterns Not Found']
+    detected = int(df[df['Count'] > 0]['Count'].sum())
+    not_detected = int(df[df['Count'] == 0].shape[0])
+    labels = ['Patterns Detected', 'Patterns Not Found']
     values = [detected, not_detected]
-    colors = ['#0077B6', '#d3d3d3']
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=categories,
-            x=values,
-            orientation='h',
-            marker_color=colors,
-            text=[f"{int(val)}" for val in values],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Count: %{x}<extra></extra>'
-        )
-    ])
-
+    colors = ['#29B5E8', '#11567F']
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values,
+        hole=0.45, marker_colors=colors,
+        textinfo='label+percent', textposition='outside'
+    ))
     fig.update_layout(
-        height=400,
-        xaxis_title='Count',
-        yaxis_title='',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=150, r=50)
+        height=400, showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=-0.35),
+        margin=dict(t=20, b=100, l=20, r=20)
     )
-
-
-def _render_pattern_sum_pie_chart(df, key_prefix=""):
-    """Render pattern summary pie chart using ECharts."""
-    detected = df[df['Count'] > 0]['Count'].sum()
-    not_detected = df[df['Count'] == 0].shape[0]
-
-    chart_data = [
-        {"value": int(detected), "name": f"Patterns Detected ({detected})"},
-        {"value": int(not_detected), "name": f"Patterns Not Found ({not_detected})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#d3d3d3"],
-        "series": [{
-            "name": "Pattern Summary",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_pattern_sum_donut_chart(df, key_prefix=""):
-    """Render pattern summary donut chart using ECharts."""
-    detected = df[df['Count'] > 0]['Count'].sum()
-    not_detected = df[df['Count'] == 0].shape[0]
-
-    chart_data = [
-        {"value": int(detected), "name": f"Patterns Detected ({detected})"},
-        {"value": int(not_detected), "name": f"Patterns Not Found ({not_detected})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#d3d3d3"],
-        "series": [{
-            "name": "Pattern Summary",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_pattern_sum_rose_chart(df, key_prefix=""):
-    """Render pattern summary rose chart using ECharts."""
-    detected = df[df['Count'] > 0]['Count'].sum()
-    not_detected = df[df['Count'] == 0].shape[0]
-
-    chart_data = [
-        {"value": int(detected), "name": "Patterns Detected"},
-        {"value": int(not_detected), "name": "Patterns Not Found"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#d3d3d3"],
-        "series": [{
-            "name": "Pattern Summary",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ============================================================
@@ -1047,21 +440,7 @@ def _render_pattern_sum_rose_chart(df, key_prefix=""):
 
 def _render_freq_occurrences_chart(df, key_prefix=""):
     """Render frequency occurrences chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_freq_occ_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_freq_occ_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_freq_occ_donut_chart(df, key_prefix)
-    else:
-        _render_freq_occ_rose_chart(df, key_prefix)
+    _render_freq_occ_bar_chart(df, key_prefix)
 
 
 def _render_freq_occ_bar_chart(df, key_prefix=""):
@@ -1089,157 +468,12 @@ def _render_freq_occ_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=220, r=50)
     )
 
-
-def _render_freq_occ_pie_chart(df, key_prefix=""):
-    """Render frequency occurrences pie chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['DETECTION_TYPE']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Occurrences",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_freq_occ_donut_chart(df, key_prefix=""):
-    """Render frequency occurrences donut chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['DETECTION_TYPE']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Occurrences",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_freq_occ_rose_chart(df, key_prefix=""):
-    """Render frequency occurrences rose chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": row['DETECTION_TYPE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Occurrences",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}freq_occ_rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_freq_distribution_chart(df, key_prefix=""):
     """Render frequency distribution chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_freq_dist_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_freq_dist_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_freq_dist_donut_chart(df, key_prefix)
-    else:
-        _render_freq_dist_rose_chart(df, key_prefix)
+    _render_freq_dist_bar_chart(df, key_prefix)
 
 
 def _render_freq_dist_bar_chart(df, key_prefix=""):
@@ -1274,352 +508,38 @@ def _render_freq_dist_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=220, r=50)
     )
 
-
-def _render_freq_dist_pie_chart(df, key_prefix=""):
-    """Render frequency distribution pie chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": row['DETECTION_TYPE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8"],
-        "series": [{
-            "name": "Distribution",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "label": {"formatter": "{d}%"},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_freq_dist_donut_chart(df, key_prefix=""):
-    """Render frequency distribution donut chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": row['DETECTION_TYPE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8"],
-        "series": [{
-            "name": "Distribution",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "label": {"formatter": "{d}%"},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_freq_dist_rose_chart(df, key_prefix=""):
-    """Render frequency distribution rose chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0]
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": row['DETECTION_TYPE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8"],
-        "series": [{
-            "name": "Distribution",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}freq_dist_rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_freq_category_chart(df, key_prefix=""):
     """Render inefficiency vs feature usage chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_freq_cat_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_freq_cat_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_freq_cat_donut_chart(df, key_prefix)
-    else:
-        _render_freq_cat_rose_chart(df, key_prefix)
+    _render_freq_cat_bar_chart(df, key_prefix)
 
 
 def _render_freq_cat_bar_chart(df, key_prefix=""):
-    """Render category bar chart using Plotly."""
-    # Categorize patterns into inefficiencies vs features
     inefficiency_patterns = ['Sort + Aggregate (Heavy Compute)', 'Order By inside CTE (Likely Redundant)', 'Heavy Distinct (>1GB Scanned)']
     feature_patterns = ['Directed Join Hints ("+")', 'ASOF Join Used', 'Collation Used']
-
-    inefficiency_count = df[df['DETECTION_TYPE'].isin(inefficiency_patterns)]['OCCURRENCE_COUNT'].sum()
-    feature_count = df[df['DETECTION_TYPE'].isin(feature_patterns)]['OCCURRENCE_COUNT'].sum()
-
-    categories = ['⚠️ Potential Inefficiencies', '✅ Advanced Features']
+    inefficiency_count = int(df[df['DETECTION_TYPE'].isin(inefficiency_patterns)]['OCCURRENCE_COUNT'].sum())
+    feature_count = int(df[df['DETECTION_TYPE'].isin(feature_patterns)]['OCCURRENCE_COUNT'].sum())
+    labels = ['⚠️ Potential Inefficiencies', '✅ Advanced Features']
     values = [inefficiency_count, feature_count]
-    colors = ['#E74C3C', '#27AE60']
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=categories,
-            x=values,
-            orientation='h',
-            marker_color=colors,
-            text=[f"{int(val):,}" for val in values],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Count: %{x:,}<extra></extra>'
-        )
-    ])
-
+    colors = ['#E8A229', '#29B5E8']
+    fig = go.Figure(go.Pie(
+        labels=labels, values=values,
+        hole=0.45, marker_colors=colors,
+        textinfo='label+percent', textposition='outside'
+    ))
     fig.update_layout(
-        height=400,
-        xaxis_title='Occurrence Count',
-        yaxis_title='',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
+        height=400, showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=-0.35),
+        margin=dict(t=20, b=100, l=20, r=20)
     )
-
-
-def _render_freq_cat_pie_chart(df, key_prefix=""):
-    """Render category pie chart using ECharts."""
-    inefficiency_patterns = ['Sort + Aggregate (Heavy Compute)', 'Order By inside CTE (Likely Redundant)', 'Heavy Distinct (>1GB Scanned)']
-    feature_patterns = ['Directed Join Hints ("+")', 'ASOF Join Used', 'Collation Used']
-
-    inefficiency_count = df[df['DETECTION_TYPE'].isin(inefficiency_patterns)]['OCCURRENCE_COUNT'].sum()
-    feature_count = df[df['DETECTION_TYPE'].isin(feature_patterns)]['OCCURRENCE_COUNT'].sum()
-
-    chart_data = [
-        {"value": int(inefficiency_count), "name": f"⚠️ Potential Inefficiencies ({int(inefficiency_count):,})"},
-        {"value": int(feature_count), "name": f"✅ Advanced Features ({int(feature_count):,})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E74C3C", "#27AE60"],
-        "series": [{
-            "name": "Category",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_freq_cat_donut_chart(df, key_prefix=""):
-    """Render category donut chart using ECharts."""
-    inefficiency_patterns = ['Sort + Aggregate (Heavy Compute)', 'Order By inside CTE (Likely Redundant)', 'Heavy Distinct (>1GB Scanned)']
-    feature_patterns = ['Directed Join Hints ("+")', 'ASOF Join Used', 'Collation Used']
-
-    inefficiency_count = df[df['DETECTION_TYPE'].isin(inefficiency_patterns)]['OCCURRENCE_COUNT'].sum()
-    feature_count = df[df['DETECTION_TYPE'].isin(feature_patterns)]['OCCURRENCE_COUNT'].sum()
-
-    chart_data = [
-        {"value": int(inefficiency_count), "name": f"⚠️ Potential Inefficiencies ({int(inefficiency_count):,})"},
-        {"value": int(feature_count), "name": f"✅ Advanced Features ({int(feature_count):,})"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E74C3C", "#27AE60"],
-        "series": [{
-            "name": "Category",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_freq_cat_rose_chart(df, key_prefix=""):
-    """Render category rose chart using ECharts."""
-    inefficiency_patterns = ['Sort + Aggregate (Heavy Compute)', 'Order By inside CTE (Likely Redundant)', 'Heavy Distinct (>1GB Scanned)']
-    feature_patterns = ['Directed Join Hints ("+")', 'ASOF Join Used', 'Collation Used']
-
-    inefficiency_count = df[df['DETECTION_TYPE'].isin(inefficiency_patterns)]['OCCURRENCE_COUNT'].sum()
-    feature_count = df[df['DETECTION_TYPE'].isin(feature_patterns)]['OCCURRENCE_COUNT'].sum()
-
-    chart_data = [
-        {"value": int(inefficiency_count), "name": "Potential Inefficiencies"},
-        {"value": int(feature_count), "name": "Advanced Features"}
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 8,
-            "itemWidth": 12,
-            "textStyle": {"fontSize": 10}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E74C3C", "#27AE60"],
-        "series": [{
-            "name": "Category",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}freq_cat_rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_freq_top_patterns_chart(df, key_prefix=""):
     """Render top patterns chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_freq_top_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_freq_top_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_freq_top_donut_chart(df, key_prefix)
-    else:
-        _render_freq_top_rose_chart(df, key_prefix)
+    _render_freq_top_bar_chart(df, key_prefix)
 
 
 def _render_freq_top_bar_chart(df, key_prefix=""):
@@ -1636,7 +556,7 @@ def _render_freq_top_bar_chart(df, key_prefix=""):
             y=plot_df['DETECTION_TYPE'],
             x=plot_df['OCCURRENCE_COUNT'],
             orientation='h',
-            marker_color='#0077B6',
+            marker_color='#11567F',
             text=[f"{int(val):,}" for val in plot_df['OCCURRENCE_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -1652,138 +572,6 @@ def _render_freq_top_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=220, r=50)
     )
 
-
-def _render_freq_top_pie_chart(df, key_prefix=""):
-    """Render top patterns pie chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0].head(5)
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['DETECTION_TYPE']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
-        "series": [{
-            "name": "Top Patterns",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
+    st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_freq_top_donut_chart(df, key_prefix=""):
-    """Render top patterns donut chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0].head(5)
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['DETECTION_TYPE']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
-        "series": [{
-            "name": "Top Patterns",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_freq_top_rose_chart(df, key_prefix=""):
-    """Render top patterns rose chart using ECharts."""
-    plot_df = df[df['OCCURRENCE_COUNT'] > 0].head(5)
-
-    if plot_df.empty:
-        st.info("No patterns detected.")
-        return
-
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": row['DETECTION_TYPE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229"],
-        "series": [{
-            "name": "Top Patterns",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}freq_top_rose")

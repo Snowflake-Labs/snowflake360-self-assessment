@@ -125,8 +125,15 @@ _WH_CONSTRAINT_SQL = """
 SELECT WAREHOUSE_NAME,
        COUNT(CASE WHEN BYTES_SPILLED_TO_REMOTE_STORAGE > 0 THEN 1 END) AS REMOTE_SPILLS,
        COUNT(CASE WHEN BYTES_SPILLED_TO_LOCAL_STORAGE > 0 THEN 1 END) AS LOCAL_SPILLS,
-       ROUND(SUM(BYTES_SPILLED_TO_REMOTE_STORAGE) / POW(1024, 3), 2) AS REMOTE_SPILL_GB,
-       ROUND(SUM(BYTES_SPILLED_TO_LOCAL_STORAGE) / POW(1024, 3), 2) AS LOCAL_SPILL_GB
+       ROUND(SUM(BYTES_SPILLED_TO_REMOTE_STORAGE) / POW(1024, 3), 2) AS TOTAL_REMOTE_SPILL_GB,
+       ROUND(SUM(BYTES_SPILLED_TO_LOCAL_STORAGE) / POW(1024, 3), 2) AS TOTAL_LOCAL_SPILL_GB,
+       COUNT(CASE WHEN ERROR_CODE = '100188' THEN 1 END) AS STATEMENT_TIMEOUTS,
+       CASE
+           WHEN COUNT(CASE WHEN BYTES_SPILLED_TO_REMOTE_STORAGE > 0 THEN 1 END) > 0 THEN 'CRITICAL'
+           WHEN COUNT(CASE WHEN BYTES_SPILLED_TO_LOCAL_STORAGE > 0 THEN 1 END) > 100 THEN 'HIGH'
+           WHEN COUNT(CASE WHEN BYTES_SPILLED_TO_LOCAL_STORAGE > 0 THEN 1 END) > 0 THEN 'MODERATE'
+           ELSE 'OK'
+       END AS SPILL_SEVERITY
 FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
 WHERE START_TIME >= DATEADD('day', -7, CURRENT_TIMESTAMP())
   AND WAREHOUSE_NAME IS NOT NULL
@@ -348,18 +355,19 @@ LIMIT 30
 
 _WH_QAS_ELIGIBLE_SQL = """
 SELECT
-    warehouse_name AS WAREHOUSE_NAME,
-    query_id AS QUERY_ID,
-    ROUND(query_acceleration_bytes_scanned / POWER(1024,4), 4) AS EST_SAVINGS_TB,
-    ROUND(total_elapsed_time / 1000.0, 1) AS DURATION_SEC,
-    LEFT(query_text, 80) AS QUERY_PREVIEW,
-    'HIGH_IMPACT' AS IMPACT_LEVEL
-FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
-WHERE start_time >= DATEADD('day', -7, CURRENT_DATE)
-  AND query_acceleration_bytes_scanned > 0
-  AND warehouse_name IS NOT NULL
-ORDER BY query_acceleration_bytes_scanned DESC
-LIMIT 20
+    WAREHOUSE_NAME,
+    QUERY_ID,
+    ROUND(ELIGIBLE_QUERY_ACCELERATION_TIME, 2) AS EST_QAS_TIME_SAVED_SEC,
+    UPPER_LIMIT_SCALE_FACTOR AS SUGGESTED_MAX_SCALE_FACTOR,
+    CASE
+        WHEN ELIGIBLE_QUERY_ACCELERATION_TIME > 60 THEN 'HIGH_IMPACT'
+        WHEN ELIGIBLE_QUERY_ACCELERATION_TIME > 10 THEN 'MODERATE_IMPACT'
+        ELSE 'LOW_IMPACT'
+    END AS IMPACT_LEVEL
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_ACCELERATION_ELIGIBLE
+WHERE START_TIME >= DATEADD('day', -7, CURRENT_DATE)
+ORDER BY ELIGIBLE_QUERY_ACCELERATION_TIME DESC
+LIMIT 10
 """
 
 _WH_QAS_USAGE_SQL = """
@@ -553,22 +561,38 @@ def _render_overview():
             heatmap_df.columns = [c.upper() for c in heatmap_df.columns]
             pivot = heatmap_df.pivot_table(index="WAREHOUSE_NAME", columns="HOUR_OF_DAY",
                                            values="AVG_QUERY_LOAD", aggfunc="mean").round(2)
-            credit_series = heatmap_df.groupby("WAREHOUSE_NAME")["TOTAL_CREDITS"].first()
+            credit_series = heatmap_df.groupby("WAREHOUSE_NAME")["TOTAL_CREDITS"].first().round(0).astype(int)
             pivot.insert(0, "CREDITS", credit_series)
             pivot = pivot.sort_values("CREDITS", ascending=False)
+
+            hour_cols = [c for c in pivot.columns if c != "CREDITS"]
+            max_val = pivot[hour_cols].max().max() or 1
+            threshold = max_val * 0.35
 
             def _heatmap_style(val):
                 if pd.isna(val) or not isinstance(val, (int, float)):
                     return "background-color: #f5f5f5; color: #999; text-align: center;"
-                max_val = heatmap_df["AVG_QUERY_LOAD"].max() or 1
                 intensity = min(val / max_val, 1.0)
-                r = int(41 + (17 - 41) * intensity)
-                g = int(181 + (86 - 181) * intensity)
-                b = int(232 + (127 - 232) * intensity)
+                if val >= threshold:
+                    r = int(232 + (180 - 232) * intensity)
+                    g = int(162 + (100 - 162) * intensity)
+                    b = int(41 + (20 - 41) * intensity)
+                else:
+                    r = int(200 + (41 - 200) * (intensity / 0.35 if threshold > 0 else 0))
+                    g = int(230 + (181 - 230) * (intensity / 0.35 if threshold > 0 else 0))
+                    b = int(250 + (232 - 250) * (intensity / 0.35 if threshold > 0 else 0))
                 fg = "white" if intensity > 0.5 else "#333"
                 return f"background-color: rgba({r},{g},{b},0.85); color: {fg}; text-align: center; font-size:11px;"
 
-            styled = pivot.style.map(_heatmap_style, subset=pivot.columns[1:])
+            def _format_val(val):
+                if pd.isna(val) or not isinstance(val, (int, float)):
+                    return "None"
+                return f"{val:.2f}"
+
+            styled = (pivot.style
+                      .map(_heatmap_style, subset=hour_cols)
+                      .format(_format_val, subset=hour_cols)
+                      .format("{:,}", subset=["CREDITS"]))
             st.dataframe(styled, use_container_width=True)
 
     with st.expander("Credit Usage Analysis", expanded=True):
@@ -706,6 +730,7 @@ def _render_fleet_query():
                 if col in hourly_df.columns:
                     hourly_df[col] = pd.to_numeric(hourly_df[col], errors="coerce").fillna(0)
             max_q = hourly_df["QUERY_COUNT"].max() or 1
+            hourly_df["PCT_OF_PEAK"] = (hourly_df["QUERY_COUNT"] / max_q * 100).round(1)
             hourly_df["ACTIVITY_LEVEL"] = hourly_df["QUERY_COUNT"].apply(
                 lambda x: "PEAK" if x >= max_q * 0.85 else ("HIGH" if x >= max_q * 0.6 else "MODERATE"))
             level_colors = {"PEAK": BRAND_PRIMARY_DARK, "HIGH": BRAND_SECONDARY, "MODERATE": "#75C2D8"}
@@ -746,19 +771,25 @@ def _render_fleet_query():
             st.success("No resource constraint issues detected in the last 7 days.")
         else:
             constraint_df.columns = [c.upper() for c in constraint_df.columns]
-            for col in ["REMOTE_SPILLS", "LOCAL_SPILLS", "REMOTE_SPILL_GB", "LOCAL_SPILL_GB"]:
+            for col in ["REMOTE_SPILLS", "LOCAL_SPILLS", "TOTAL_REMOTE_SPILL_GB", "TOTAL_LOCAL_SPILL_GB", "STATEMENT_TIMEOUTS"]:
                 if col in constraint_df.columns:
                     constraint_df[col] = pd.to_numeric(constraint_df[col], errors="coerce").fillna(0)
+            _sev_colors = {"CRITICAL": BRAND_PRIMARY_DARK, "HIGH": BRAND_ACCENT, "MODERATE": '#75C2D8'}
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**Remote Spills by Warehouse**")
                 df_r = constraint_df[constraint_df["REMOTE_SPILLS"] > 0].sort_values("REMOTE_SPILLS", ascending=True)
                 if not df_r.empty:
+                    bar_colors = [_sev_colors.get(s, BRAND_SECONDARY) for s in df_r.get("SPILL_SEVERITY", pd.Series(["MODERATE"] * len(df_r)))]
                     fig = go.Figure(go.Bar(y=df_r["WAREHOUSE_NAME"], x=df_r["REMOTE_SPILLS"],
-                                           orientation="h", marker_color=BRAND_PRIMARY_DARK,
+                                           orientation="h", marker_color=bar_colors,
                                            text=df_r["REMOTE_SPILLS"].tolist(), textposition="outside"))
+                    for sev, color in _sev_colors.items():
+                        if sev in df_r.get("SPILL_SEVERITY", pd.Series([])).values:
+                            fig.add_trace(go.Bar(y=[None], x=[None], name=sev, marker_color=color, showlegend=True))
                     fig.update_layout(height=max(250, len(df_r)*28), margin=dict(t=10, b=20, l=200, r=60),
-                                      xaxis_title="Remote Spills", showlegend=False)
+                                      xaxis_title="Remote Spills", barmode="overlay",
+                                      legend=dict(title="SPILL_SEVERITY", orientation="v", x=1.02, y=1))
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.success("No remote spills detected.")
@@ -792,21 +823,27 @@ def _render_fleet_query():
             col_bar, col_table = st.columns(2)
             with col_bar:
                 st.markdown("**Estimated QAS Time Savings (sec)**")
-                top_qas = qas_df.head(10).sort_values("EST_SAVINGS_TB", ascending=True)
+                savings_col = "EST_QAS_TIME_SAVED_SEC" if "EST_QAS_TIME_SAVED_SEC" in qas_df.columns else "EST_SAVINGS_TB"
+                qas_df[savings_col] = pd.to_numeric(qas_df[savings_col], errors="coerce").fillna(0)
+                top_qas = qas_df.head(10).sort_values(savings_col, ascending=True)
                 labels = (top_qas["QUERY_ID"].str[:8] + " @ " + top_qas["WAREHOUSE_NAME"]).tolist()
-                impact_colors = {"HIGH_IMPACT": BRAND_PRIMARY_DARK}
+                impact_colors = {"HIGH_IMPACT": BRAND_PRIMARY_DARK, "MODERATE_IMPACT": BRAND_SECONDARY, "LOW_IMPACT": "#75C2D8"}
                 bar_colors = [impact_colors.get(l, BRAND_SECONDARY) for l in top_qas.get("IMPACT_LEVEL", pd.Series(["HIGH_IMPACT"]*len(top_qas)))]
-                fig = go.Figure(go.Bar(y=labels, x=top_qas["EST_SAVINGS_TB"],
+                fig = go.Figure(go.Bar(y=labels, x=top_qas[savings_col],
                                        orientation="h", marker_color=bar_colors,
-                                       text=[f"{v:.2f} TB" for v in top_qas["EST_SAVINGS_TB"]],
+                                       text=[f"{v:.1f}" for v in top_qas[savings_col]],
                                        textposition="outside",
                                        customdata=top_qas.get("IMPACT_LEVEL", pd.Series([""] * len(top_qas))),
-                                       hovertemplate="<b>%{y}</b><br>Savings: %{x:.4f} TB<extra></extra>"))
+                                       hovertemplate="<b>%{y}</b><br>Savings: %{x:.1f}s<extra></extra>"))
+                for imp, color in impact_colors.items():
+                    if imp in top_qas.get("IMPACT_LEVEL", pd.Series([])).values:
+                        fig.add_trace(go.Bar(y=[None], x=[None], name=imp, marker_color=color, showlegend=True))
                 fig.update_layout(height=max(280, len(top_qas)*30), margin=dict(t=10, b=20, l=260, r=80),
-                                  xaxis_title="Saved (TB)", showlegend=False)
+                                  xaxis_title="Saved (sec)", barmode="overlay",
+                                  legend=dict(title="IMPACT_LEVEL", orientation="v", x=1.02, y=1))
                 st.plotly_chart(fig, use_container_width=True)
             with col_table:
-                show_cols = [c for c in ["WAREHOUSE_NAME", "QUERY_ID", "EST_SAVINGS_TB"] if c in qas_df.columns]
+                show_cols = [c for c in ["WAREHOUSE_NAME", "QUERY_ID", "EST_QAS_TIME_SAVED_SEC", "EST_SAVINGS_TB"] if c in qas_df.columns]
                 st.dataframe(qas_df[show_cols], use_container_width=True)
 
     with st.expander("Query Acceleration Service (QAS) — Usage Summary", expanded=True):

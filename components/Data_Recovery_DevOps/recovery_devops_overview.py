@@ -1,165 +1,119 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .dcm_adoption import comp_dcm_adoption
-from .git_integration import comp_git_integration
-from .cicd_automation import comp_cicd_automation
-from .declarative_pipeline import comp_declarative_pipeline
+from .dcm_adoption import comp_dcm_adoption, _ALL_DCM_QUERIES
+from .git_integration import comp_git_integration, _ALL_GIT_QUERIES
+from .cicd_automation import comp_cicd_automation, _ALL_CICD_QUERIES
+from .declarative_pipeline import comp_declarative_pipeline, _ALL_ORCH_QUERIES
 
+_C1 = '#29B5E8'
+_C2 = '#11567F'
+_C3 = '#75C2D8'
+_CA = '#E8A229'
 
-def _cached_sql(cache_key, sql):
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
-    session = st.session_state.get("session")
-    if not session:
-        return pd.DataFrame()
-    try:
-        df = session.sql(sql).to_pandas()
-    except Exception:
-        df = pd.DataFrame()
-    st.session_state[cache_key] = df
-    return df
-
-
-_DCM_ADOPTION_SQL = """
-SELECT
-    CASE
-        WHEN query_text ILIKE '%CREATE OR ALTER%' THEN 'Declarative (DevOps Pattern)'
-        WHEN query_text ILIKE '%EXECUTE IMMEDIATE FROM%' THEN 'Deployment from File/Git'
-        ELSE 'Imperative (Standard DDL)'
-    END AS ddl_pattern,
-    COUNT(*) AS execution_count,
-    COUNT(DISTINCT user_name) AS distinct_users
-FROM SNOWFLAKE.ACCOUNT_USAGE.query_history
-WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-  AND query_type IN ('CREATE_TABLE', 'ALTER_TABLE', 'EXECUTE_IMMEDIATE')
-  AND execution_status = 'SUCCESS'
-GROUP BY ALL
-ORDER BY 2 DESC
-"""
-
-_GIT_INTEGRATION_SQL = """
-SELECT
-    'Git Operation' AS category,
-    CASE
-        WHEN query_text ILIKE '%ALTER GIT REPOSITORY%FETCH%' THEN 'Git Fetch (Update)'
-        WHEN query_text ILIKE '%FROM @%branches/%' OR query_text ILIKE '%FROM @%tags/%' THEN 'Execution from Git'
-        ELSE 'Other'
-    END AS operation_type,
-    COUNT(*) AS count_ops
-FROM SNOWFLAKE.ACCOUNT_USAGE.query_history
-WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-  AND (
-      query_text ILIKE '%ALTER GIT REPOSITORY%'
-      OR query_text ILIKE '%FROM @%'
-  )
-GROUP BY ALL
-"""
-
-_CICD_AUTOMATION_SQL = """
-SELECT
-    CASE
-        WHEN s.client_application_id ILIKE '%GitHub%' THEN 'GitHub Actions'
-        WHEN s.client_application_id ILIKE '%GitLab%' THEN 'GitLab CI'
-        WHEN s.client_application_id ILIKE '%Jenkins%' THEN 'Jenkins'
-        WHEN s.client_application_id ILIKE '%Terraform%' THEN 'Terraform'
-        WHEN s.client_application_id ILIKE '%Schemachange%' THEN 'Schemachange'
-        WHEN q.user_name ILIKE '%SVC_%' OR q.user_name ILIKE '%CI_%' THEN 'Service Account (Generic)'
-        ELSE 'Human / Other'
-    END AS deployment_agent,
-    COUNT(DISTINCT s.session_id) AS session_count,
-    COUNT(DISTINCT q.query_id) AS ddl_operations_count
-FROM SNOWFLAKE.ACCOUNT_USAGE.sessions s
-JOIN SNOWFLAKE.ACCOUNT_USAGE.query_history q
-    ON s.session_id = q.session_id
-WHERE q.start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-  AND (
-      q.query_type ILIKE 'CREATE%' OR
-      q.query_type ILIKE 'ALTER%' OR
-      q.query_type ILIKE 'DROP%' OR
-      q.query_type ILIKE 'GRANT%'
-  )
-GROUP BY all
-ORDER BY 3 DESC
-"""
-
-_DECLARATIVE_PIPELINE_SQL = """
-WITH dt_usage AS (
-    SELECT 'Dynamic Tables (Declarative)' AS type, COUNT(*) as activity_count
-    FROM SNOWFLAKE.ACCOUNT_USAGE.dynamic_table_refresh_history
-    WHERE data_timestamp >= DATEADD('day', -7, CURRENT_TIMESTAMP())
-),
-task_usage AS (
-    SELECT 'Tasks (Imperative)' AS type, COUNT(*) as activity_count
-    FROM SNOWFLAKE.ACCOUNT_USAGE.task_history
-    WHERE scheduled_time >= DATEADD('day', -7, CURRENT_TIMESTAMP())
-),
-aggr AS (
-    SELECT * FROM dt_usage
-    UNION ALL
-    SELECT * FROM task_usage
+_SQL_MATURITY_SCORE = """
+WITH metrics AS (
+    SELECT
+        SUM(CASE WHEN query_text ILIKE '%CREATE OR ALTER%' THEN 1 ELSE 0 END) AS declarative_ddl,
+        SUM(CASE WHEN query_text ILIKE '%EXECUTE IMMEDIATE FROM%' THEN 1 ELSE 0 END) AS git_deploys,
+        COUNT(*) AS total_ddl
+    FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+    WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+      AND query_type IN ('CREATE_TABLE','ALTER_TABLE','EXECUTE_IMMEDIATE','CREATE_VIEW')
+      AND execution_status = 'SUCCESS'
 )
-SELECT a.* FROM aggr a
-"""
-
-_DEVOPS_GIT_COUNT_SQL = """
-SELECT COUNT(DISTINCT user_name) AS git_users
-FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
-WHERE start_time >= DATEADD('day', -30, CURRENT_DATE)
-  AND (query_text ILIKE '%CREATE GIT REPOSITORY%' OR query_text ILIKE '%ALTER GIT REPOSITORY%'
-       OR query_text ILIKE '%EXECUTE IMMEDIATE FROM%')
-"""
-
-_DEVOPS_CICD_COUNT_SQL = """
-SELECT COUNT(DISTINCT user_name) AS cicd_users
-FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
-WHERE start_time >= DATEADD('day', -30, CURRENT_DATE)
-  AND (reported_client_type ILIKE '%PYTHON%' OR reported_client_type ILIKE '%JDBC%'
-       OR reported_client_type ILIKE '%GO%' OR reported_client_type ILIKE '%ODBC%')
-  AND query_type IN ('CREATE_TABLE', 'CREATE_VIEW', 'ALTER_TABLE', 'DROP_TABLE')
-"""
-
-_DEVOPS_DT_COUNT_SQL = """
-SELECT COUNT(*) AS dt_count
-FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
-WHERE table_type = 'DYNAMIC TABLE' AND deleted IS NULL
-"""
-
-_DEVOPS_TASK_COUNT_SQL = """
-SELECT COUNT(*) AS task_count
-FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY
-WHERE scheduled_time >= DATEADD('day', -30, CURRENT_DATE)
-"""
-
-_DEVOPS_COMBINED_SQL = """
 SELECT
-    'DDL Operations' AS category, COUNT(*) AS activity_count
-FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
-WHERE start_time >= DATEADD('day', -30, CURRENT_DATE)
-  AND query_type IN ('CREATE_TABLE', 'CREATE_VIEW', 'ALTER_TABLE', 'DROP_TABLE', 'CREATE_SCHEMA', 'DROP_SCHEMA')
-UNION ALL
-SELECT 'Task Executions', COUNT(*)
-FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY
-WHERE scheduled_time >= DATEADD('day', -30, CURRENT_DATE)
-UNION ALL
-SELECT 'Dynamic Table Refreshes', COUNT(*)
-FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY
-WHERE refresh_start_time >= DATEADD('day', -30, CURRENT_DATE)
-ORDER BY activity_count DESC
+    declarative_ddl,
+    git_deploys,
+    total_ddl,
+    CASE
+        WHEN declarative_ddl * 100.0 / NULLIF(total_ddl, 0) > 50 AND git_deploys > 0 THEN 'ADVANCED'
+        WHEN declarative_ddl * 100.0 / NULLIF(total_ddl, 0) > 20 OR git_deploys > 0 THEN 'INTERMEDIATE'
+        WHEN total_ddl > 0 THEN 'BASIC'
+        ELSE 'NO_DATA'
+    END AS devops_maturity_level,
+    CASE
+        WHEN declarative_ddl * 100.0 / NULLIF(total_ddl, 0) < 20
+        THEN 'Adopt CREATE OR ALTER for declarative, idempotent deployments'
+        WHEN git_deploys = 0
+        THEN 'Consider Git integration for version-controlled deployments'
+        ELSE 'DevOps practices look mature'
+    END AS primary_recommendation
+FROM metrics
 """
 
-_ALL_DEVOPS_QUERIES = {
-    "rd_dcm_adoption": _DCM_ADOPTION_SQL,
-    "rd_git_integration": _GIT_INTEGRATION_SQL,
-    "rd_cicd_automation": _CICD_AUTOMATION_SQL,
-    "rd_declarative_pipeline": _DECLARATIVE_PIPELINE_SQL,
-    "devops_git_count": _DEVOPS_GIT_COUNT_SQL,
-    "devops_cicd_count": _DEVOPS_CICD_COUNT_SQL,
-    "devops_dt_count": _DEVOPS_DT_COUNT_SQL,
-    "devops_task_count": _DEVOPS_TASK_COUNT_SQL,
-    "devops_combined": _DEVOPS_COMBINED_SQL,
+_SQL_SUMMARY_METRICS = """
+WITH ddl_patterns AS (
+    SELECT
+        SUM(CASE WHEN query_text ILIKE '%CREATE OR ALTER%' THEN 1 ELSE 0 END) AS declarative_count,
+        SUM(CASE WHEN query_text ILIKE '%EXECUTE IMMEDIATE FROM%' THEN 1 ELSE 0 END) AS git_deploy_count,
+        SUM(CASE WHEN query_text ILIKE '%CREATE OR REPLACE%' THEN 1 ELSE 0 END) AS idempotent_count,
+        COUNT(*) AS total_ddl
+    FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+    WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+      AND query_type IN ('CREATE_TABLE','ALTER_TABLE','EXECUTE_IMMEDIATE','CREATE_VIEW','ALTER_VIEW')
+      AND execution_status = 'SUCCESS'
+),
+automation_stats AS (
+    SELECT
+        COUNT(DISTINCT CASE
+            WHEN s.client_application_id ILIKE '%GitHub%'
+                 OR s.client_application_id ILIKE '%GitLab%'
+                 OR s.client_application_id ILIKE '%Jenkins%'
+                 OR s.client_application_id ILIKE '%Terraform%'
+                 OR s.client_application_id ILIKE '%dbt%'
+            THEN q.query_id
+        END) AS automated_ddl_count
+    FROM SNOWFLAKE.ACCOUNT_USAGE.SESSIONS s
+    INNER JOIN SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY q
+        ON s.session_id = q.session_id
+    WHERE q.start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+      AND (q.query_type ILIKE 'CREATE%' OR q.query_type ILIKE 'ALTER%')
+),
+orchestration_stats AS (
+    SELECT
+        (SELECT COUNT(*) FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY
+         WHERE data_timestamp >= DATEADD('day', -7, CURRENT_TIMESTAMP())) AS dt_refreshes,
+        (SELECT COUNT(*) FROM SNOWFLAKE.ACCOUNT_USAGE.TASK_HISTORY
+         WHERE scheduled_time >= DATEADD('day', -7, CURRENT_TIMESTAMP())) AS task_runs
+)
+SELECT 'DDL Patterns' AS metric_category, 'Declarative DDL (CREATE OR ALTER)' AS metric_name, dp.declarative_count AS metric_value,
+    ROUND(dp.declarative_count * 100.0 / NULLIF(dp.total_ddl, 0), 1) AS pct_of_total
+FROM ddl_patterns dp
+UNION ALL
+SELECT 'DDL Patterns', 'Git-based Deployments', dp.git_deploy_count,
+    ROUND(dp.git_deploy_count * 100.0 / NULLIF(dp.total_ddl, 0), 1)
+FROM ddl_patterns dp
+UNION ALL
+SELECT 'DDL Patterns', 'Idempotent DDL (CREATE OR REPLACE)', dp.idempotent_count,
+    ROUND(dp.idempotent_count * 100.0 / NULLIF(dp.total_ddl, 0), 1)
+FROM ddl_patterns dp
+UNION ALL
+SELECT 'Automation', 'CI/CD Automated DDL Operations', ast.automated_ddl_count,
+    ROUND(ast.automated_ddl_count * 100.0 / NULLIF((SELECT total_ddl FROM ddl_patterns), 0), 1)
+FROM automation_stats ast
+UNION ALL
+SELECT 'Orchestration', 'Dynamic Table Refreshes (7d)', os.dt_refreshes, NULL
+FROM orchestration_stats os
+UNION ALL
+SELECT 'Orchestration', 'Task Runs (7d)', os.task_runs, NULL
+FROM orchestration_stats os
+ORDER BY metric_category, metric_name
+"""
+
+_ALL_SUMMARY_QUERIES = {
+    "rd_maturity_score": _SQL_MATURITY_SCORE,
+    "rd_summary_metrics": _SQL_SUMMARY_METRICS,
 }
+
+_ALL_DEVOPS_QUERIES = {}
+_ALL_DEVOPS_QUERIES.update(_ALL_DCM_QUERIES)
+_ALL_DEVOPS_QUERIES.update(_ALL_GIT_QUERIES)
+_ALL_DEVOPS_QUERIES.update(_ALL_CICD_QUERIES)
+_ALL_DEVOPS_QUERIES.update(_ALL_ORCH_QUERIES)
+_ALL_DEVOPS_QUERIES.update(_ALL_SUMMARY_QUERIES)
 
 
 def _run_query_thread(session, key, sql):
@@ -193,6 +147,20 @@ def _prefetch_all_devops_queries(progress_bar=None, status_text=None):
                 status_text.text(f"Loading data... ({completed}/{total} queries)")
 
 
+def _cached_sql(cache_key, sql):
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    session = st.session_state.get("session")
+    if not session:
+        return pd.DataFrame()
+    try:
+        df = session.sql(sql).to_pandas()
+    except Exception:
+        df = pd.DataFrame()
+    st.session_state[cache_key] = df
+    return df
+
+
 def comp_recovery_devops_overview(entry_actions=None):
     try:
         status_ph = st.empty()
@@ -200,20 +168,19 @@ def comp_recovery_devops_overview(entry_actions=None):
         all_cached = all(k in st.session_state for k in _ALL_DEVOPS_QUERIES)
         if not all_cached:
             status_ph.markdown(
-                '<p style="color: #003D73; font-weight: 600;">Loading Data Recovery & DevOps data...</p>',
+                f'<p style="color:{_C2};font-weight:600;">Loading DevOps data...</p>',
                 unsafe_allow_html=True)
             progress_bar_widget = progress_ph.progress(0)
             _prefetch_all_devops_queries(progress_bar=progress_bar_widget, status_text=status_ph)
             progress_ph.empty()
             status_ph.empty()
-        else:
-            _prefetch_all_devops_queries()
-        tab_dcm, tab_git, tab_cicd, tab_pipeline, tab_summary = st.tabs([
+
+        tab_dcm, tab_git, tab_cicd, tab_orch, tab_summary = st.tabs([
             "Database Change Management (DCM) Adoption",
             "Git Integration Usage",
             "CI/CD Tool Automation",
-            "Declarative Pipeline Adoption (Dynamic Tables)",
-            "DevOps Summary"
+            "Orchestration Patterns",
+            "DevOps Maturity Summary"
         ])
 
         with tab_dcm:
@@ -225,89 +192,137 @@ def comp_recovery_devops_overview(entry_actions=None):
         with tab_cicd:
             comp_cicd_automation()
 
-        with tab_pipeline:
+        with tab_orch:
             comp_declarative_pipeline()
 
         with tab_summary:
-            _render_devops_summary()
+            _render_devops_maturity_summary()
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
-                    f'</div>', unsafe_allow_html=True)
-
-
-def _render_devops_summary():
-    st.markdown("### DevOps Maturity Summary")
-
-    with st.expander("DevOps Maturity Score", expanded=True):
         st.markdown(
-            '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
-            'ℹ️&nbsp;&nbsp;<b>DevOps Maturity:</b> Composite assessment of Git integration, CI/CD automation, '
-            'DCM adoption, and declarative pipeline usage.</div>',
-            unsafe_allow_html=True)
-        try:
-            git_df = st.session_state.get("devops_git_count", pd.DataFrame())
-            cicd_df = st.session_state.get("devops_cicd_count", pd.DataFrame())
-            dt_df = st.session_state.get("devops_dt_count", pd.DataFrame())
-            task_df = st.session_state.get("devops_task_count", pd.DataFrame())
+            f'<div style="background-color:#FDEDEC;border-left:6px solid {_CA};padding:10px;">'
+            f'Error: {str(e)}</div>', unsafe_allow_html=True)
 
-            git_users = int(git_df.iloc[0, 0]) if not git_df.empty else 0
-            cicd_users = int(cicd_df.iloc[0, 0]) if not cicd_df.empty else 0
-            dt_count = int(dt_df.iloc[0, 0]) if not dt_df.empty else 0
-            task_runs = int(task_df.iloc[0, 0]) if not task_df.empty else 0
 
-            git_score = min(25, git_users * 5)
-            cicd_score = min(25, cicd_users * 5)
-            dt_score = min(25, dt_count * 2)
-            task_score = min(25, 25 if task_runs > 100 else int(task_runs * 25 / 100))
-            total_score = git_score + cicd_score + dt_score + task_score
+def _render_devops_maturity_summary():
+    score_df = _cached_sql("rd_maturity_score", _SQL_MATURITY_SCORE)
 
-            level = 'Advanced' if total_score >= 75 else 'Intermediate' if total_score >= 40 else 'Foundational'
-            col1, col2, col3, col4, col5 = st.columns(5)
-            with col1:
-                st.metric("Overall Score", f"{total_score}/100")
-            with col2:
-                st.metric("Git Integration", f"{git_score}/25")
-            with col3:
-                st.metric("CI/CD Automation", f"{cicd_score}/25")
-            with col4:
-                st.metric("Dynamic Tables", f"{dt_score}/25")
-            with col5:
-                st.metric("Task Orchestration", f"{task_score}/25")
+    if score_df.empty:
+        st.info("No maturity score data available.")
+        return
 
-            categories = ['Git Integration', 'CI/CD Automation', 'Dynamic Tables', 'Task Orchestration']
-            scores = [git_score, cicd_score, dt_score, task_score]
-            colors = ['#29B5E8', '#11567F', '#75C2D8', '#E8A229']
-            fig = go.Figure(go.Bar(x=categories, y=scores, marker_color=colors,
-                                   text=scores, textposition='outside'))
-            fig.add_hline(y=25, line_dash="dash", line_color="#003D73", annotation_text="Max per category")
-            fig.update_layout(title=f'DevOps Maturity: {level} ({total_score}/100)',
-                              yaxis_title='Score', height=360, margin=dict(t=50, b=60))
-            st.plotly_chart(fig, use_container_width=True)
-        except Exception as e:
-            st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+    score_df.columns = ['DECLARATIVE_DDL', 'GIT_DEPLOYS', 'TOTAL_DDL', 'DEVOPS_MATURITY_LEVEL', 'PRIMARY_RECOMMENDATION']
 
-    with st.expander("Combined DevOps Dashboard", expanded=True):
-        st.markdown(
-            '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
-            'ℹ️&nbsp;&nbsp;<b>Combined Dashboard:</b> Key DevOps activity metrics over the last 30 days.</div>',
-            unsafe_allow_html=True)
-        try:
-            df = st.session_state.get("devops_combined", pd.DataFrame())
-            if df.empty:
-                st.info("No DevOps activity data available.")
-            else:
-                df['ACTIVITY_COUNT'] = pd.to_numeric(df['ACTIVITY_COUNT'], errors='coerce').fillna(0)
-                colors = ['#29B5E8', '#11567F', '#75C2D8']
-                fig = go.Figure(go.Bar(
-                    x=df['CATEGORY'], y=df['ACTIVITY_COUNT'],
-                    marker_color=colors[:len(df)],
-                    text=df['ACTIVITY_COUNT'].astype(int), textposition='outside'
+    decl = int(score_df.iloc[0]['DECLARATIVE_DDL']) if score_df.iloc[0]['DECLARATIVE_DDL'] else 0
+    git_dep = int(score_df.iloc[0]['GIT_DEPLOYS']) if score_df.iloc[0]['GIT_DEPLOYS'] else 0
+    total_ddl = int(score_df.iloc[0]['TOTAL_DDL']) if score_df.iloc[0]['TOTAL_DDL'] else 0
+    level = str(score_df.iloc[0]['DEVOPS_MATURITY_LEVEL'])
+    recommendation = str(score_df.iloc[0]['PRIMARY_RECOMMENDATION'])
+
+    level_map = {'NO_DATA': 0, 'BASIC': 1, 'INTERMEDIATE': 2, 'ADVANCED': 3}
+    score_val = level_map.get(level, 0)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Maturity Level", level)
+    c2.metric("Declarative DDL", f"{decl:,}")
+    c3.metric("Git Deployments", f"{git_dep:,}")
+    c4.metric("Total Successful DDL", f"{total_ddl:,}")
+
+    st.markdown("### Primary Recommendation")
+    st.markdown(
+        f'<div style="background-color:#e8f4f8;border-left:6px solid {_C1};padding:12px;border-radius:4px;">'
+        f'{recommendation}</div>',
+        unsafe_allow_html=True)
+
+    st.markdown("")
+
+    st.markdown(
+        f'<div style="text-align:center;color:{_C1};font-size:18px;font-weight:600;">DevOps Maturity Score</div>',
+        unsafe_allow_html=True)
+
+    theta_vals = np.linspace(0, 180, 100)
+    r_vals = [1] * 100
+    x_bg = [r * np.cos(np.radians(t)) for r, t in zip(r_vals, theta_vals)]
+    y_bg = [r * np.sin(np.radians(t)) for r, t in zip(r_vals, theta_vals)]
+
+    sections = [
+        (0, 45, _C3, 'No Data'),
+        (45, 90, _CA, 'Basic'),
+        (90, 135, _C1, 'Intermediate'),
+        (135, 180, _C2, 'Advanced'),
+    ]
+
+    fig = go.Figure()
+    for start_a, end_a, color, label in sections:
+        t = np.linspace(start_a, end_a, 30)
+        xs = [0] + [0.95 * np.cos(np.radians(a)) for a in t] + [0]
+        ys = [0] + [0.95 * np.sin(np.radians(a)) for a in t] + [0]
+        fig.add_trace(go.Scatter(x=xs, y=ys, fill='toself', fillcolor=color,
+                                 line=dict(color='white', width=1),
+                                 hoverinfo='text', text=label, showlegend=False))
+        mid_a = (start_a + end_a) / 2
+        lx = 1.12 * np.cos(np.radians(mid_a))
+        ly = 1.12 * np.sin(np.radians(mid_a))
+        fig.add_annotation(x=lx, y=ly, text=label, showarrow=False,
+                           font=dict(size=11, color='#333'))
+
+    needle_angle = 45 * score_val + 22.5
+    nx = 0.75 * np.cos(np.radians(needle_angle))
+    ny = 0.75 * np.sin(np.radians(needle_angle))
+    fig.add_trace(go.Scatter(x=[0, nx], y=[0, ny], mode='lines',
+                             line=dict(color=_CA, width=4), showlegend=False))
+    fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers',
+                             marker=dict(size=10, color=_CA), showlegend=False))
+
+    fig.add_annotation(x=0, y=0.35, text=f"<b>{score_val} / 3</b>",
+                       showarrow=False, font=dict(size=36, color='#333'))
+
+    fig.update_layout(
+        height=350, xaxis=dict(visible=False, range=[-1.3, 1.3]),
+        yaxis=dict(visible=False, range=[-0.2, 1.3], scaleanchor='x'),
+        margin=dict(t=20, b=20, l=20, r=20), plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)'
+    )
+    st.plotly_chart(fig, use_container_width=True, key="maturity_gauge")
+
+    metrics_df = _cached_sql("rd_summary_metrics", _SQL_SUMMARY_METRICS)
+    if not metrics_df.empty:
+        metrics_df.columns = ['METRIC_CATEGORY', 'METRIC_NAME', 'METRIC_VALUE', 'PCT_OF_TOTAL']
+
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.markdown("**DevOps Summary Metrics**")
+            plot_df = metrics_df.sort_values('METRIC_VALUE', ascending=True)
+            cat_colors = {'DDL Patterns': _C2, 'Orchestration': _C1, 'Automation': _C3}
+            bar_colors = [cat_colors.get(c, _C1) for c in plot_df['METRIC_CATEGORY']]
+            fig = go.Figure(go.Bar(
+                y=plot_df['METRIC_NAME'], x=plot_df['METRIC_VALUE'],
+                orientation='h', marker_color=bar_colors,
+                text=[f"{int(v):,}" if pd.notna(v) else '0' for v in plot_df['METRIC_VALUE']],
+                textposition='outside',
+                hovertemplate='<b>%{y}</b><br>Value: %{x:,}<extra></extra>'
+            ))
+            fig.update_layout(height=400, xaxis_title='Metric Value', showlegend=False,
+                              margin=dict(t=20, b=50, l=250, r=50))
+            st.plotly_chart(fig, use_container_width=True, key="summary_metrics_bar")
+
+        with col_r:
+            st.markdown("**Summary Metric Value Mix**")
+            cat_agg = metrics_df.groupby('METRIC_CATEGORY')['METRIC_VALUE'].sum().reset_index()
+            cat_agg = cat_agg[cat_agg['METRIC_VALUE'] > 0]
+            if not cat_agg.empty:
+                colors = [cat_colors.get(c, _C1) for c in cat_agg['METRIC_CATEGORY']]
+                fig = go.Figure(go.Pie(
+                    labels=cat_agg['METRIC_CATEGORY'], values=cat_agg['METRIC_VALUE'],
+                    hole=0.45, marker=dict(colors=colors),
+                    textinfo='label+percent', textposition='outside',
+                    hovertemplate='<b>%{label}</b><br>Value: %{value:,}<br>%{percent}<extra></extra>'
                 ))
-                fig.update_layout(title='DevOps Activity (Last 30 Days)', yaxis_title='Count',
-                                  height=360, margin=dict(t=50, b=80))
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(df)
-        except Exception as e:
-            st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+                fig.update_layout(height=400, showlegend=True,
+                                  legend=dict(orientation='h', y=-0.15, x=0.5, xanchor='center'),
+                                  margin=dict(t=20, b=60, l=20, r=20))
+                st.plotly_chart(fig, use_container_width=True, key="summary_mix_donut")
+            else:
+                st.info("No metric data for mix chart.")
+
+        st.dataframe(metrics_df, use_container_width=True)

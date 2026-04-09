@@ -56,7 +56,7 @@ def comp_finops_overview(entry_actions=None):
         tab_visibility, tab_control, tab_optimization = st.tabs([
             "Visibility",
             "Control",
-            "Optimisation"
+            "Optimization"
         ])
 
         with tab_visibility:
@@ -69,6 +69,6 @@ def comp_finops_overview(entry_actions=None):
             comp_finops_optimization()
 
     except Exception as e:
-        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
+        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E8A229; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
+                    f'Component Error: {str(e)}'
                     f'</div>', unsafe_allow_html=True)

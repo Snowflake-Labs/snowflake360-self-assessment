@@ -1,12 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-try:
-    from streamlit_echarts import st_echarts
-except ImportError:
-    def st_echarts(**kwargs):
-        import streamlit as st
-        st.info("Chart unavailable (echarts not supported in SiS)")
 
 
 def _cached_sql(cache_key, sql):
@@ -188,7 +182,7 @@ ORDER BY 2 DESC
 
                 # Display the dataframe
                 st.dataframe(
-                    df,
+                    category_df,
                 )
 
                 # Charts Section
@@ -230,21 +224,7 @@ ORDER BY 2 DESC
 
 def _render_category_occurrences_chart(df, key_prefix=""):
     """Render category occurrences chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_category_occ_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_category_occ_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_category_occ_donut_chart(df, key_prefix)
-    else:
-        _render_category_occ_rose_chart(df, key_prefix)
+    _render_category_occ_bar_chart(df, key_prefix)
 
 
 def _render_category_occ_bar_chart(df, key_prefix=""):
@@ -274,142 +254,12 @@ def _render_category_occ_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=180, r=50)
     )
 
-
-def _render_category_occ_pie_chart(df, key_prefix=""):
-    """Render category occurrences pie chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'OCCURRENCE_COUNT': 'sum'}).reset_index()
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['CATEGORY']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Occurrences",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_category_occ_donut_chart(df, key_prefix=""):
-    """Render category occurrences donut chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'OCCURRENCE_COUNT': 'sum'}).reset_index()
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['CATEGORY']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Occurrences",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_category_occ_rose_chart(df, key_prefix=""):
-    """Render category occurrences rose chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'OCCURRENCE_COUNT': 'sum'}).reset_index()
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": row['CATEGORY']}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Occurrences",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_distinct_queries_chart(df, key_prefix=""):
     """Render distinct queries by category chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_distinct_queries_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_distinct_queries_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_distinct_queries_donut_chart(df, key_prefix)
-    else:
-        _render_distinct_queries_rose_chart(df, key_prefix)
+    _render_distinct_queries_bar_chart(df, key_prefix)
 
 
 def _render_distinct_queries_bar_chart(df, key_prefix=""):
@@ -422,7 +272,7 @@ def _render_distinct_queries_bar_chart(df, key_prefix=""):
             y=agg_df['CATEGORY'],
             x=agg_df['DISTINCT_QUERIES'],
             orientation='h',
-            marker_color='#E8A229',
+            marker_color='#11567F',
             text=[f"{int(val):,}" for val in agg_df['DISTINCT_QUERIES']],
             textposition='outside',
             textfont=dict(size=10),
@@ -438,145 +288,12 @@ def _render_distinct_queries_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=180, r=50)
     )
 
-
-def _render_distinct_queries_pie_chart(df, key_prefix=""):
-    """Render distinct queries pie chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'DISTINCT_QUERIES': 'sum'}).reset_index()
-    chart_data = [
-        {"value": int(row['DISTINCT_QUERIES']), "name": f"{row['CATEGORY']} ({int(row['DISTINCT_QUERIES']):,})"}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
-        "series": [{
-            "name": "Distinct Queries",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_distinct_queries_donut_chart(df, key_prefix=""):
-    """Render distinct queries donut chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'DISTINCT_QUERIES': 'sum'}).reset_index()
-    chart_data = [
-        {"value": int(row['DISTINCT_QUERIES']), "name": f"{row['CATEGORY']} ({int(row['DISTINCT_QUERIES']):,})"}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
-        "series": [{
-            "name": "Distinct Queries",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_distinct_queries_rose_chart(df, key_prefix=""):
-    """Render distinct queries rose chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'DISTINCT_QUERIES': 'sum'}).reset_index()
-    chart_data = [
-        {"value": int(row['DISTINCT_QUERIES']), "name": row['CATEGORY']}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
-        "series": [{
-            "name": "Distinct Queries",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_insight_codes_chart(df, key_prefix=""):
     """Render top insight codes chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_insight_codes_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_insight_codes_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_insight_codes_donut_chart(df, key_prefix)
-    else:
-        _render_insight_codes_rose_chart(df, key_prefix)
+    _render_insight_codes_bar_chart(df, key_prefix)
 
 
 def _render_insight_codes_bar_chart(df, key_prefix=""):
@@ -589,7 +306,7 @@ def _render_insight_codes_bar_chart(df, key_prefix=""):
             y=plot_df['INSIGHT_CODE'],
             x=plot_df['OCCURRENCE_COUNT'],
             orientation='h',
-            marker_color='#27AE60',
+            marker_color='#29B5E8',
             text=[f"{int(val):,}" for val in plot_df['OCCURRENCE_COUNT']],
             textposition='outside',
             textfont=dict(size=10),
@@ -605,301 +322,30 @@ def _render_insight_codes_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=200, r=50)
     )
 
-
-def _render_insight_codes_pie_chart(df, key_prefix=""):
-    """Render insight codes pie chart using ECharts."""
-    plot_df = df.nlargest(10, 'OCCURRENCE_COUNT')
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['INSIGHT_CODE']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Insight Codes",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_insight_codes_donut_chart(df, key_prefix=""):
-    """Render insight codes donut chart using ECharts."""
-    plot_df = df.nlargest(10, 'OCCURRENCE_COUNT')
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": f"{row['INSIGHT_CODE']} ({int(row['OCCURRENCE_COUNT']):,})"}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Insight Codes",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_insight_codes_rose_chart(df, key_prefix=""):
-    """Render insight codes rose chart using ECharts."""
-    plot_df = df.nlargest(10, 'OCCURRENCE_COUNT')
-    chart_data = [
-        {"value": int(row['OCCURRENCE_COUNT']), "name": row['INSIGHT_CODE']}
-        for _, row in plot_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 8}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#27AE60", "#27AE60", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#E74C3C", "#E74C3C", "#0077B6", "#0077B6"],
-        "series": [{
-            "name": "Insight Codes",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_category_distribution_chart(df, key_prefix=""):
     """Render category distribution chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_category_dist_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_category_dist_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_category_dist_donut_chart(df, key_prefix)
-    else:
-        _render_category_dist_rose_chart(df, key_prefix)
+    _render_category_dist_bar_chart(df, key_prefix)
 
 
 def _render_category_dist_bar_chart(df, key_prefix=""):
-    """Render category distribution bar chart using Plotly."""
-    # Count unique insight codes per category
-    agg_df = df.groupby('CATEGORY').agg({'INSIGHT_CODE': 'count'}).reset_index()
-    agg_df.columns = ['CATEGORY', 'INSIGHT_CODE_COUNT']
-    agg_df = agg_df.sort_values('INSIGHT_CODE_COUNT', ascending=True)
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=agg_df['CATEGORY'],
-            x=agg_df['INSIGHT_CODE_COUNT'],
-            orientation='h',
-            marker_color='#0077B6',
-            text=[f"{int(val)}" for val in agg_df['INSIGHT_CODE_COUNT']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Insight Types: %{x}<extra></extra>'
-        )
-    ])
-
+    agg_df = df.groupby('CATEGORY').agg({'OCCURRENCE_COUNT': 'sum'}).reset_index()
+    colors = ['#29B5E8', '#11567F', '#75C2D8', '#E8A229', '#1A7DA8', '#023E8A', '#0A4F7A']
+    fig = go.Figure(go.Pie(
+        labels=agg_df['CATEGORY'],
+        values=agg_df['OCCURRENCE_COUNT'],
+        hole=0.45,
+        marker_colors=colors[:len(agg_df)],
+        textinfo='label+percent', textposition='outside'
+    ))
     fig.update_layout(
-        height=400,
-        xaxis_title='Number of Insight Types',
-        yaxis_title='',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
+        height=400, showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=-0.4),
+        margin=dict(t=20, b=120, l=20, r=20)
     )
-
-
-def _render_category_dist_pie_chart(df, key_prefix=""):
-    """Render category distribution pie chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'INSIGHT_CODE': 'count'}).reset_index()
-    agg_df.columns = ['CATEGORY', 'INSIGHT_CODE_COUNT']
-
-    chart_data = [
-        {"value": int(row['INSIGHT_CODE_COUNT']), "name": f"{row['CATEGORY']} ({int(row['INSIGHT_CODE_COUNT'])})"}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
-        "series": [{
-            "name": "Category Distribution",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_category_dist_donut_chart(df, key_prefix=""):
-    """Render category distribution donut chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'INSIGHT_CODE': 'count'}).reset_index()
-    agg_df.columns = ['CATEGORY', 'INSIGHT_CODE_COUNT']
-
-    chart_data = [
-        {"value": int(row['INSIGHT_CODE_COUNT']), "name": f"{row['CATEGORY']} ({int(row['INSIGHT_CODE_COUNT'])})"}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
-        "series": [{
-            "name": "Category Distribution",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_category_dist_rose_chart(df, key_prefix=""):
-    """Render category distribution rose chart using ECharts."""
-    agg_df = df.groupby('CATEGORY').agg({'INSIGHT_CODE': 'count'}).reset_index()
-    agg_df.columns = ['CATEGORY', 'INSIGHT_CODE_COUNT']
-
-    chart_data = [
-        {"value": int(row['INSIGHT_CODE_COUNT']), "name": row['CATEGORY']}
-        for _, row in agg_df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} types ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
-        "series": [{
-            "name": "Category Distribution",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ============================================================
@@ -908,21 +354,7 @@ def _render_category_dist_rose_chart(df, key_prefix=""):
 
 def _render_cat_summary_occurrences_chart(df, key_prefix=""):
     """Render category summary occurrences chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_cat_sum_occ_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_cat_sum_occ_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_cat_sum_occ_donut_chart(df, key_prefix)
-    else:
-        _render_cat_sum_occ_rose_chart(df, key_prefix)
+    _render_cat_sum_occ_bar_chart(df, key_prefix)
 
 
 def _render_cat_sum_occ_bar_chart(df, key_prefix=""):
@@ -950,139 +382,12 @@ def _render_cat_sum_occ_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=180, r=50)
     )
 
-
-def _render_cat_sum_occ_pie_chart(df, key_prefix=""):
-    """Render category summary occurrences pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_OCCURRENCES']), "name": f"{row['PROBLEM_CATEGORY']} ({int(row['TOTAL_OCCURRENCES']):,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Total Occurrences",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_cat_sum_occ_donut_chart(df, key_prefix=""):
-    """Render category summary occurrences donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_OCCURRENCES']), "name": f"{row['PROBLEM_CATEGORY']} ({int(row['TOTAL_OCCURRENCES']):,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Total Occurrences",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_cat_sum_occ_rose_chart(df, key_prefix=""):
-    """Render category summary occurrences rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_OCCURRENCES']), "name": row['PROBLEM_CATEGORY']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Total Occurrences",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_cat_summary_distinct_chart(df, key_prefix=""):
     """Render category summary distinct queries chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_cat_sum_dist_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_cat_sum_dist_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_cat_sum_dist_donut_chart(df, key_prefix)
-    else:
-        _render_cat_sum_dist_rose_chart(df, key_prefix)
+    _render_cat_sum_dist_bar_chart(df, key_prefix)
 
 
 def _render_cat_sum_dist_bar_chart(df, key_prefix=""):
@@ -1110,142 +415,12 @@ def _render_cat_sum_dist_bar_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=180, r=50)
     )
 
-
-def _render_cat_sum_dist_pie_chart(df, key_prefix=""):
-    """Render category summary distinct queries pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['DISTINCT_QUERIES_AFFECTED']), "name": f"{row['PROBLEM_CATEGORY']} ({int(row['DISTINCT_QUERIES_AFFECTED']):,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
-        "series": [{
-            "name": "Distinct Queries",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_cat_sum_dist_donut_chart(df, key_prefix=""):
-    """Render category summary distinct queries donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['DISTINCT_QUERIES_AFFECTED']), "name": f"{row['PROBLEM_CATEGORY']} ({int(row['DISTINCT_QUERIES_AFFECTED']):,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
-        "series": [{
-            "name": "Distinct Queries",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_cat_sum_dist_rose_chart(df, key_prefix=""):
-    """Render category summary distinct queries rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['DISTINCT_QUERIES_AFFECTED']), "name": row['PROBLEM_CATEGORY']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#E8A229", "#27AE60", "#E74C3C", "#0077B6", "#11567F", "#75C2D8", "#666666"],
-        "series": [{
-            "name": "Distinct Queries",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_cat_summary_comparison_chart(df, key_prefix=""):
     """Render category summary comparison chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_cat_sum_comp_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_cat_sum_comp_grouped_bar_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_cat_sum_comp_stacked_bar_chart(df, key_prefix)
-    else:
-        _render_cat_sum_comp_ratio_chart(df, key_prefix)
+    _render_cat_sum_comp_bar_chart(df, key_prefix)
 
 
 def _render_cat_sum_comp_bar_chart(df, key_prefix=""):
@@ -1285,6 +460,8 @@ def _render_cat_sum_comp_bar_chart(df, key_prefix=""):
         margin=dict(t=40, b=50, l=180, r=50)
     )
 
+    st.plotly_chart(fig, use_container_width=True)
+
 
 def _render_cat_sum_comp_grouped_bar_chart(df, key_prefix=""):
     """Render comparison using vertical grouped bar chart."""
@@ -1320,6 +497,8 @@ def _render_cat_sum_comp_grouped_bar_chart(df, key_prefix=""):
         xaxis=dict(tickangle=45)
     )
 
+    st.plotly_chart(fig, use_container_width=True)
+
 
 def _render_cat_sum_comp_stacked_bar_chart(df, key_prefix=""):
     """Render comparison using stacked bar chart."""
@@ -1349,6 +528,8 @@ def _render_cat_sum_comp_stacked_bar_chart(df, key_prefix=""):
         xaxis=dict(tickangle=45)
     )
 
+    st.plotly_chart(fig, use_container_width=True)
+
 
 def _render_cat_sum_comp_ratio_chart(df, key_prefix=""):
     """Render occurrences per query ratio chart."""
@@ -1377,170 +558,28 @@ def _render_cat_sum_comp_ratio_chart(df, key_prefix=""):
         margin=dict(t=20, b=50, l=180, r=50)
     )
 
+    st.plotly_chart(fig, use_container_width=True)
+
 
 def _render_cat_summary_proportion_chart(df, key_prefix=""):
     """Render category proportion chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_cat_sum_prop_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_cat_sum_prop_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_cat_sum_prop_donut_chart(df, key_prefix)
-    else:
-        _render_cat_sum_prop_rose_chart(df, key_prefix)
+    _render_cat_sum_prop_bar_chart(df, key_prefix)
 
 
 def _render_cat_sum_prop_bar_chart(df, key_prefix=""):
-    """Render category proportion bar chart using Plotly."""
-    total = df['TOTAL_OCCURRENCES'].sum()
-    plot_df = df.copy()
-    plot_df['PERCENTAGE'] = ((plot_df['TOTAL_OCCURRENCES'] / total) * 100).round(1)
-    plot_df = plot_df.sort_values('PERCENTAGE', ascending=True)
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['PROBLEM_CATEGORY'],
-            x=plot_df['PERCENTAGE'],
-            orientation='h',
-            marker_color='#0077B6',
-            text=[f"{val:.1f}%" for val in plot_df['PERCENTAGE']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Proportion: %{x:.1f}%<extra></extra>'
-        )
-    ])
-
+    colors = ['#29B5E8', '#11567F', '#75C2D8', '#E8A229', '#1A7DA8', '#023E8A', '#0A4F7A']
+    fig = go.Figure(go.Pie(
+        labels=df['PROBLEM_CATEGORY'],
+        values=df['TOTAL_OCCURRENCES'],
+        hole=0.45,
+        marker_colors=colors[:len(df)],
+        textinfo='label+percent', textposition='outside'
+    ))
     fig.update_layout(
-        height=400,
-        xaxis_title='Percentage of Total',
-        yaxis_title='',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
+        height=400, showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=-0.4),
+        margin=dict(t=20, b=120, l=20, r=20)
     )
+    st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_cat_sum_prop_pie_chart(df, key_prefix=""):
-    """Render category proportion pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_OCCURRENCES']), "name": row['PROBLEM_CATEGORY']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
-        "series": [{
-            "name": "Category Proportion",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "label": {"formatter": "{b}: {d}%"},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_cat_sum_prop_donut_chart(df, key_prefix=""):
-    """Render category proportion donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_OCCURRENCES']), "name": row['PROBLEM_CATEGORY']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
-        "series": [{
-            "name": "Category Proportion",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "label": {"formatter": "{b}: {d}%"},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_cat_sum_prop_rose_chart(df, key_prefix=""):
-    """Render category proportion rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['TOTAL_OCCURRENCES']), "name": row['PROBLEM_CATEGORY']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c:,} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "color": ["#0077B6", "#0077B6", "#29B5E8", "#75C2D8", "#E8A229", "#E8A229", "#27AE60"],
-        "series": [{
-            "name": "Category Proportion",
-            "type": "pie",
-            "radius": ["10%", "55%"],
-            "center": ["50%", "40%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")

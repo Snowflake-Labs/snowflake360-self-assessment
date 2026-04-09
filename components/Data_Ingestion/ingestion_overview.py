@@ -2,11 +2,15 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from core.config.design_tokens import CHART_SERIES, CHART_EXTENDED, BRAND_PRIMARY, BRAND_SECONDARY
+from core.config.design_tokens import CHART_SERIES, CHART_EXTENDED, BRAND_SECONDARY, BRAND_ACCENT, COLOR_LIGHT
+
+_C1 = '#29B5E8'
+_C2 = '#11567F'
+_C3 = '#75C2D8'
+_CA = '#E8A229'
+
 from .bulk_load_analysis import comp_bulk_load_analysis
 from .snowpipe_analysis import comp_snowpipe_analysis
-
-PALETTE = CHART_SERIES + CHART_EXTENDED
 
 _SNOWPIPE_STREAMING_SQL = """
 SELECT
@@ -25,7 +29,9 @@ WITH copy_summary AS (
         'COPY Command' AS method,
         COUNT(*) AS job_count,
         SUM(file_size) / POW(1024, 3) AS gb_loaded,
-        SUM(row_count) AS rows_loaded
+        SUM(row_count) AS rows_loaded,
+        ROUND(AVG(file_size) / POW(1024, 2), 2) AS avg_file_mb,
+        0 AS credits_last_30_days
     FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY
     WHERE status = 'Loaded'
       AND pipe_name IS NULL
@@ -35,22 +41,43 @@ pipe_summary AS (
     SELECT
         'Snowpipe' AS method,
         COUNT(*) AS job_count,
-        SUM(file_size) / POW(1024, 3) AS gb_loaded,
-        SUM(row_count) AS rows_loaded
-    FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY
-    WHERE status = 'Loaded'
-      AND pipe_name IS NOT NULL
-      AND last_load_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+        SUM(ch.file_size) / POW(1024, 3) AS gb_loaded,
+        SUM(ch.row_count) AS rows_loaded,
+        ROUND(AVG(ch.file_size) / POW(1024, 2), 2) AS avg_file_mb,
+        (SELECT COALESCE(SUM(credits_used), 0)
+         FROM SNOWFLAKE.ACCOUNT_USAGE.PIPE_USAGE_HISTORY
+         WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())) AS credits_last_30_days
+    FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY ch
+    WHERE ch.status = 'Loaded'
+      AND ch.pipe_name IS NOT NULL
+      AND ch.last_load_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
 ),
+streaming_summary AS (
+    SELECT
+        'Snowpipe Streaming' AS method,
+        0 AS job_count,
+        0 AS gb_loaded,
+        0 AS rows_loaded,
+        0 AS avg_file_mb,
+        COALESCE((SELECT SUM(credits_used)
+         FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY
+         WHERE service_type = 'SNOWPIPE_STREAMING'
+           AND usage_date >= DATEADD('day', -30, CURRENT_DATE)), 0) AS credits_last_30_days
+)
 SELECT
     method AS ingestion_method,
     job_count AS events_or_channels,
-    ROUND(COALESCE(gb_loaded, 0), 2) AS gb_loaded_30d,
-    COALESCE(rows_loaded, 0) AS rows_loaded_30d
+    ROUND(COALESCE(gb_loaded, 0), 3) AS gb_loaded_30d,
+    COALESCE(rows_loaded, 0) AS rows_loaded_30d,
+    COALESCE(avg_file_mb, 0) AS avg_file_mb,
+    ROUND(COALESCE(credits_last_30_days, 0), 4) AS credits_last_30_days
 FROM copy_summary
 UNION ALL
-SELECT method, job_count, ROUND(COALESCE(gb_loaded, 0), 2), COALESCE(rows_loaded, 0)
+SELECT method, job_count, ROUND(COALESCE(gb_loaded, 0), 3), COALESCE(rows_loaded, 0), COALESCE(avg_file_mb, 0), ROUND(COALESCE(credits_last_30_days, 0), 4)
 FROM pipe_summary
+UNION ALL
+SELECT method, job_count, gb_loaded, rows_loaded, avg_file_mb, ROUND(credits_last_30_days, 4)
+FROM streaming_summary
 ORDER BY gb_loaded_30d DESC NULLS LAST
 """
 
@@ -61,8 +88,7 @@ def _run_query(sql):
         return pd.DataFrame()
     try:
         return session.sql(sql).to_pandas()
-    except Exception as e:
-        st.warning(f"Query error: {e}")
+    except Exception:
         return pd.DataFrame()
 
 
@@ -83,16 +109,24 @@ ORDER BY total_credits DESC
 _BULK_LOAD_SQL = """
 WITH copy_stats AS (
     SELECT
-        table_schema_name || '.' || table_name AS target_table,
+        table_catalog_name || '.' || table_schema_name || '.' || table_name AS target_table,
         COUNT(*) AS job_count,
-        SUM(file_size) / POW(1024, 3) AS total_gb_ingested,
-        AVG(file_size) / POW(1024, 2) AS avg_file_size_mb,
-        MAX(file_size) / POW(1024, 2) AS max_file_size_mb,
+        SUM(row_count) AS total_rows_loaded,
+        ROUND(SUM(file_size) / POW(1024, 3), 2) AS total_gb,
+        ROUND(AVG(file_size) / POW(1024, 2), 2) AS avg_file_mb,
+        ROUND(MIN(file_size) / POW(1024, 2), 2) AS min_file_mb,
+        ROUND(MAX(file_size) / POW(1024, 2), 2) AS max_file_mb,
+        ROUND(STDDEV(file_size) / POW(1024, 2), 2) AS stddev_file_mb,
         CASE
             WHEN MAX(file_size) > (AVG(file_size) * 100) THEN '⚠️ High Variance (Outliers)'
-            WHEN AVG(file_size) < 10 THEN '⚠️ Small Files (<10MB)'
+            WHEN AVG(file_size) / POW(1024, 2) < 10 THEN '⚠️ Small Files (<10MB)'
             ELSE '✅ Healthy'
-        END AS health_check
+        END AS health_check,
+        CASE
+            WHEN MAX(file_size) > (AVG(file_size) * 100) THEN 'High file size variance detected'
+            WHEN AVG(file_size) / POW(1024, 2) < 10 THEN 'Batch files before ingestion'
+            ELSE 'File sizing looks appropriate'
+        END AS recommendation
     FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY
     WHERE status = 'Loaded'
       AND pipe_name IS NULL
@@ -101,54 +135,90 @@ WITH copy_stats AS (
 )
 SELECT
     target_table,
-    job_count AS "Load Events",
-    ROUND(total_gb_ingested, 2) AS "Total GB",
-    ROUND(avg_file_size_mb, 2) AS "Avg File (MB)",
-    ROUND(max_file_size_mb, 2) AS "Max File (MB)",
-    health_check
+    job_count,
+    total_gb,
+    total_rows_loaded,
+    avg_file_mb,
+    min_file_mb,
+    max_file_mb,
+    stddev_file_mb,
+    health_check,
+    recommendation
 FROM copy_stats
-ORDER BY total_gb_ingested DESC
+ORDER BY total_gb DESC
 LIMIT 20
 """
 
 _PIPE_EFFICIENCY_SQL = """
 WITH pipe_costs AS (
-    SELECT pipe_name, SUM(credits_used) AS credits_30d
+    SELECT
+        pipe_name,
+        SUM(credits_used) AS credits_30d,
+        SUM(bytes_inserted) / POW(1024, 3) AS bytes_gb_30d,
+        SUM(files_inserted) AS files_inserted_30d
     FROM SNOWFLAKE.ACCOUNT_USAGE.PIPE_USAGE_HISTORY
     WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
     GROUP BY 1
 ),
 pipe_volume AS (
-    SELECT pipe_name, COUNT(*) AS files_loaded,
+    SELECT
+        pipe_name,
+        COUNT(*) AS files_loaded,
         SUM(file_size) / POW(1024, 3) AS gb_loaded,
-        AVG(file_size) / POW(1024, 2) AS avg_file_mb
+        AVG(file_size) / POW(1024, 2) AS avg_file_mb,
+        SUM(row_count) AS rows_loaded
     FROM SNOWFLAKE.ACCOUNT_USAGE.COPY_HISTORY
     WHERE pipe_name IS NOT NULL
+      AND status = 'Loaded'
       AND last_load_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
     GROUP BY 1
 )
 SELECT
-    v.pipe_name,
-    v.files_loaded AS "Files (30d)",
-    ROUND(v.gb_loaded, 2) AS "GB Ingested",
-    ROUND(v.avg_file_mb, 2) AS "Avg File (MB)",
-    ROUND(c.credits_30d, 2) AS "Credits Used (30d)",
-    ROUND(c.credits_30d / NULLIF(v.gb_loaded, 0), 2) AS "Credits per GB"
+    COALESCE(v.pipe_name, c.pipe_name) AS pipe_name,
+    COALESCE(v.files_loaded, 0) AS files_loaded,
+    ROUND(COALESCE(v.gb_loaded, 0), 3) AS gb_ingested,
+    COALESCE(v.rows_loaded, 0) AS rows_loaded,
+    ROUND(COALESCE(v.avg_file_mb, 0), 2) AS avg_file_mb,
+    ROUND(COALESCE(c.credits_30d, 0), 4) AS credits_used,
+    ROUND(COALESCE(c.credits_30d, 0) / NULLIF(COALESCE(v.gb_loaded, 0), 0), 4) AS credits_per_gb,
+    CASE
+        WHEN COALESCE(v.gb_loaded, 0) = 0 AND COALESCE(c.credits_30d, 0) > 0 THEN '🔴 Idle Burning Credits'
+        WHEN COALESCE(c.credits_30d, 0) / NULLIF(COALESCE(v.gb_loaded, 0), 0) > 1 THEN '🟡 High Cost per GB'
+        WHEN COALESCE(v.avg_file_mb, 0) < 10 THEN '🟡 Small File Overhead'
+        ELSE '🟢 Efficient'
+    END AS efficiency_status,
+    CASE
+        WHEN COALESCE(v.gb_loaded, 0) = 0 AND COALESCE(c.credits_30d, 0) > 0
+            THEN 'Pipe is active but not loading data - consider suspending'
+        WHEN COALESCE(c.credits_30d, 0) / NULLIF(COALESCE(v.gb_loaded, 0), 0) > 1
+            THEN 'High cost per GB - review file sizes and batching strategy'
+        WHEN COALESCE(v.avg_file_mb, 0) < 10
+            THEN 'Batch small files before ingestion'
+        ELSE 'Pipe is operating efficiently'
+    END AS recommendation
 FROM pipe_volume v
-LEFT JOIN pipe_costs c ON v.pipe_name = c.pipe_name
-ORDER BY c.credits_30d DESC
+FULL OUTER JOIN pipe_costs c ON v.pipe_name = c.pipe_name
+ORDER BY COALESCE(c.credits_30d, 0) DESC
 """
 
 _SNOWPIPE_DETAIL_SQL = """
 SELECT
     pipe_name,
-    SUM(credits_used) AS credits_burned,
-    SUM(bytes_inserted) / POW(1024, 3) AS gb_loaded,
+    ROUND(SUM(credits_used), 4) AS credits_burned,
+    SUM(files_inserted) AS files_inserted,
+    ROUND(SUM(bytes_inserted) / POW(1024, 3), 3) AS gb_loaded,
     CASE
-        WHEN SUM(bytes_inserted) = 0 THEN '🔴 100% Overhead (Spinning)'
-        WHEN (SUM(credits_used) / NULLIF(SUM(bytes_inserted),0)) > 0.1 THEN '🟡 High Overhead'
+        WHEN SUM(bytes_inserted) = 0 AND SUM(credits_used) > 0 THEN '🔴 Overhead Only'
+        WHEN SUM(bytes_inserted) > 0 AND (SUM(credits_used) / (SUM(bytes_inserted) / POW(1024, 3))) > 1 THEN '🟡 High Overhead'
         ELSE '🟢 Efficient'
-    END AS status
+    END AS status,
+    CASE
+        WHEN SUM(bytes_inserted) = 0 AND SUM(credits_used) > 0
+            THEN 'Pipe consuming credits without loading data - suspend or investigate'
+        WHEN SUM(bytes_inserted) > 0 AND (SUM(credits_used) / (SUM(bytes_inserted) / POW(1024, 3))) > 1
+            THEN 'High credit cost per GB - review file sizes and notification frequency'
+        ELSE 'Pipe is operating efficiently'
+    END AS recommendation
 FROM SNOWFLAKE.ACCOUNT_USAGE.PIPE_USAGE_HISTORY
 WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
 GROUP BY ALL
@@ -157,23 +227,46 @@ LIMIT 10
 """
 
 _PIPE_COST_PROJECTION_SQL = """
-WITH costs AS (
-    SELECT 'Snowpipe (File)' AS type, SUM(credits_used) AS total_credits
+WITH snowpipe_costs AS (
+    SELECT
+        'Snowpipe (File-based)' AS ingest_method,
+        SUM(credits_used) AS total_credits,
+        SUM(bytes_inserted) / POW(1024, 3) AS total_gb,
+        SUM(files_inserted) AS total_files
     FROM SNOWFLAKE.ACCOUNT_USAGE.PIPE_USAGE_HISTORY
     WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-    UNION ALL
-    SELECT 'Snowpipe Streaming' AS type, SUM(CREDITS_USED_COMPUTE + CREDITS_USED_CLOUD_SERVICES)
+),
+streaming_costs AS (
+    SELECT
+        'Snowpipe Streaming' AS ingest_method,
+        SUM(credits_used_compute + credits_used_cloud_services) AS total_credits,
+        NULL AS total_gb,
+        NULL AS total_files
     FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY
     WHERE service_type = 'SNOWPIPE_STREAMING'
       AND usage_date >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+),
+combined AS (
+    SELECT * FROM snowpipe_costs
+    UNION ALL
+    SELECT * FROM streaming_costs
 )
 SELECT
-    type AS ingest_method,
-    ROUND(total_credits, 1) AS last_30_days,
-    ROUND(total_credits * 3, 0) AS est_3_months,
-    ROUND(total_credits * 6, 0) AS est_6_months,
-    ROUND(total_credits * 12, 0) AS est_12_months
-FROM costs
+    ingest_method,
+    ROUND(COALESCE(total_credits, 0), 4) AS credits_last_30_days,
+    ROUND(COALESCE(total_gb, 0), 2) AS gb_ingested_30_days,
+    COALESCE(total_files, 0) AS files_processed_30_days,
+    ROUND(COALESCE(total_credits, 0) * 3, 0) AS est_credits_3_months,
+    ROUND(COALESCE(total_credits, 0) * 6, 0) AS est_credits_6_months,
+    ROUND(COALESCE(total_credits, 0) * 12, 0) AS est_credits_12_months,
+    CASE
+        WHEN COALESCE(total_credits, 0) > 100 THEN 'High Usage'
+        WHEN COALESCE(total_credits, 0) > 10 THEN 'Moderate Usage'
+        ELSE 'Low Usage'
+    END AS usage_tier
+FROM combined
+WHERE COALESCE(total_credits, 0) > 0
+ORDER BY COALESCE(total_credits, 0) DESC
 """
 
 _ALL_INGESTION_QUERIES = {
@@ -220,7 +313,7 @@ def _prefetch_all_ingestion_queries(progress_bar=None, status_text=None):
 
 def _render_snowpipe_streaming():
     st.markdown("#### Snowpipe Streaming Credit Usage (Last 30 Days)")
-    st.markdown("Daily credit consumption from Snowpipe Streaming ingestion.")
+    st.caption("Daily credit consumption from Snowpipe Streaming ingestion.")
 
     ck = "ingestion_streaming_data"
     if ck not in st.session_state:
@@ -245,7 +338,7 @@ def _render_snowpipe_streaming():
     fig = go.Figure(data=[go.Bar(
         x=df["usage_date"].astype(str),
         y=df["credits_used"],
-        marker_color=BRAND_PRIMARY,
+        marker_color=_C1,
         text=[f"{v:.4f}" for v in df["credits_used"]],
         textposition="outside",
         hovertemplate="<b>%{x}</b><br>Credits: %{y:.4f}<extra></extra>",
@@ -267,9 +360,6 @@ def _render_snowpipe_streaming():
 
 
 def _render_ingestion_summary():
-    st.markdown("#### Ingestion Summary Dashboard (Last 30 Days)")
-    st.markdown("Comparison of all ingestion methods: COPY Command, Snowpipe, and Snowpipe Streaming.")
-
     ck = "ingestion_summary_data"
     if ck not in st.session_state:
         st.session_state[ck] = _run_query(_INGESTION_SUMMARY_SQL)
@@ -279,53 +369,70 @@ def _render_ingestion_summary():
         st.info("No ingestion activity detected in the last 30 days.")
         return
 
-    df["gb_loaded_30d"] = df["gb_loaded_30d"].astype(float)
-    df["rows_loaded_30d"] = df["rows_loaded_30d"].astype(float)
+    for col in ['EVENTS_OR_CHANNELS', 'GB_LOADED_30D', 'ROWS_LOADED_30D', 'AVG_FILE_MB', 'CREDITS_LAST_30_DAYS']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    methods = df["ingestion_method"].tolist()
-    colors = [PALETTE[i % len(PALETTE)] for i in range(len(df))]
+    with st.expander("Ingestion Method Summary Dashboard", expanded=True):
+        st.caption("30-day comparison across COPY, Snowpipe, and Snowpipe Streaming using channel history for activity and metering history for streaming credits.")
+        st.markdown("### Top-Line Ingestion Summary")
+        st.dataframe(df, use_container_width=True)
 
-    col1, col2 = st.columns(2)
+        methods = df['INGESTION_METHOD'].tolist()
+        colors = [_C1, _C2, _C3][:len(df)]
 
-    with col1:
-        st.markdown("##### GB Loaded (30 Days) by Method")
-        fig = go.Figure(data=[go.Bar(
-            x=methods, y=df["gb_loaded_30d"],
-            marker_color=colors,
-            text=[f"{v:.2f} GB" for v in df["gb_loaded_30d"]],
-            textposition="outside",
-            hovertemplate="<b>%{x}</b><br>GB: %{y:.2f}<extra></extra>",
-        )])
-        fig.update_layout(height=350, margin=dict(t=30, b=60, l=40, r=20),
-                          yaxis_title="GB Loaded", showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            fig1 = go.Figure(go.Pie(
+                labels=methods, values=df['EVENTS_OR_CHANNELS'].tolist(),
+                hole=0.4, marker_colors=colors,
+                textinfo='percent', textposition='inside',
+                hovertemplate="<b>%{label}</b><br>Events: %{value:,.0f}<br>%{percent}<extra></extra>"))
+            fig1.update_layout(title="Events / Channels by Method", height=320, margin=dict(t=40, b=10, l=10, r=10),
+                               legend=dict(orientation="h", y=-0.1))
+            st.plotly_chart(fig1, use_container_width=True)
 
-    with col2:
-        st.markdown("##### Rows Loaded (30 Days) by Method")
-        fig = go.Figure(data=[go.Pie(
-            labels=methods,
-            values=df["rows_loaded_30d"].tolist(),
-            hole=0.35,
-            marker_colors=colors,
-            hovertemplate="<b>%{label}</b><br>Rows: %{value:,.0f}<extra></extra>",
-        )])
-        fig.update_layout(height=350, margin=dict(t=10, b=10, l=10, r=10))
-        st.plotly_chart(fig, use_container_width=True)
+        with c2:
+            fig2 = go.Figure(go.Pie(
+                labels=methods, values=df['GB_LOADED_30D'].tolist(),
+                hole=0.4, marker_colors=colors,
+                textinfo='percent', textposition='inside',
+                hovertemplate="<b>%{label}</b><br>GB: %{value:,.3f}<br>%{percent}<extra></extra>"))
+            fig2.update_layout(title="Data Volume (GB) by Method", height=320, margin=dict(t=40, b=10, l=10, r=10),
+                               legend=dict(orientation="h", y=-0.1))
+            st.plotly_chart(fig2, use_container_width=True)
 
-    with st.expander("Ingestion Method Summary Table", expanded=True):
+        credits_col = 'CREDITS_LAST_30_DAYS' if 'CREDITS_LAST_30_DAYS' in df.columns else None
+        with c3:
+            if credits_col and df[credits_col].sum() > 0:
+                credit_methods = df[df[credits_col] > 0]['INGESTION_METHOD'].tolist()
+                credit_vals = df[df[credits_col] > 0][credits_col].tolist()
+                credit_colors = [colors[i] for i, m in enumerate(methods) if m in credit_methods]
+                fig3 = go.Figure(go.Pie(
+                    labels=credit_methods, values=credit_vals,
+                    hole=0.4, marker_colors=credit_colors,
+                    textinfo='percent', textposition='inside',
+                    hovertemplate="<b>%{label}</b><br>Credits: %{value:,.4f}<br>%{percent}<extra></extra>"))
+                fig3.update_layout(title="Credits Consumed by Method", height=320, margin=dict(t=40, b=10, l=10, r=10),
+                                   legend=dict(orientation="h", y=-0.1))
+                st.plotly_chart(fig3, use_container_width=True)
+            else:
+                st.info("No credit data available.")
+
+        st.markdown("#### Side-by-Side Ingestion Comparison")
+        fig4 = go.Figure()
+        fig4.add_trace(go.Bar(x=methods, y=df['EVENTS_OR_CHANNELS'].tolist(), name='Events / Channels', marker_color=_C1))
+        fig4.add_trace(go.Bar(x=methods, y=df['ROWS_LOADED_30D'].tolist(), name='Rows', marker_color=_C2))
+        if credits_col:
+            fig4.add_trace(go.Bar(x=methods, y=df[credits_col].tolist(), name='Credits', marker_color=_CA))
+        fig4.update_layout(barmode='group', height=400, margin=dict(t=30, b=60, l=60, r=30),
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        st.plotly_chart(fig4, use_container_width=True)
+
         st.dataframe(df, use_container_width=True)
 
 
 def comp_ingestion_overview(entry_actions=None):
-    """
-    Data Ingestion Overview Component
-
-    Renders sub-tabs for:
-    - Bulk Load (COPY INTO) Analysis
-    - Snowpipe Analysis (Cost vs. Volume)
-    - Snowpipe Streaming
-    - Ingestion Summary Dashboard
-    """
     try:
         status_ph = st.empty()
         progress_ph = st.empty()
@@ -366,35 +473,17 @@ def comp_ingestion_overview(entry_actions=None):
     except Exception as e:
         st.markdown(
             f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-            f'🛑&nbsp;&nbsp;Error loading Data Ingestion Overview: {str(e)}'
+            f'Error loading Data Ingestion Overview: {str(e)}'
             f'</div>', unsafe_allow_html=True)
 
 
 def _render_streaming_service_breakdown():
-    st.markdown(
-        '<div style="background-color:#f0f7fb;border-left:6px solid #29B5E8;padding:10px;">'
-        'ℹ️&nbsp;&nbsp;<b>Streaming Service Breakdown:</b> Snowpipe Streaming credits broken down by '
-        'entity (warehouse/service) name from metering history.</div>',
-        unsafe_allow_html=True)
     try:
-        query = """
-        SELECT
-            entity_id AS service_entity,
-            ROUND(SUM(credits_used), 4) AS total_credits,
-            COUNT(DISTINCT usage_date) AS active_days,
-            MIN(usage_date) AS first_seen,
-            MAX(usage_date) AS last_seen
-        FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY
-        WHERE service_type = 'SNOWPIPE_STREAMING'
-          AND usage_date >= DATEADD('day', -30, CURRENT_DATE)
-        GROUP BY entity_id
-        ORDER BY total_credits DESC
-        """
         ck = "ingestion_streaming_breakdown"
         if ck in st.session_state:
             df = st.session_state[ck]
         else:
-            df = _run_query(query)
+            df = _run_query(_STREAMING_BREAKDOWN_SQL)
             st.session_state[ck] = df
         if df.empty:
             st.info("No Snowpipe Streaming service-level detail available.")
@@ -412,6 +501,6 @@ def _render_streaming_service_breakdown():
             yaxis_title='Credits', height=360, margin=dict(t=50, b=80)
         )
         st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(df)
+        st.dataframe(df, use_container_width=True)
     except Exception as e:
-        st.markdown(f'<div style="background-color:#FDEDEC;border-left:6px solid #E74C3C;padding:10px;">🛑&nbsp;&nbsp;Error: {str(e)}</div>', unsafe_allow_html=True)
+        st.error(f"Error loading streaming breakdown: {e}")

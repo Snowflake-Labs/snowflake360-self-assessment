@@ -1,12 +1,35 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-try:
-    from streamlit_echarts import st_echarts
-except ImportError:
-    def st_echarts(**kwargs):
-        import streamlit as st
-        st.info("Chart unavailable (echarts not supported in SiS)")
+
+_C1 = '#29B5E8'
+_C2 = '#11567F'
+_C3 = '#75C2D8'
+_CA = '#E8A229'
+
+_SQL_DDL_PATTERNS = """
+SELECT
+    CASE
+        WHEN query_text ILIKE '%CREATE OR ALTER%' THEN 'Declarative (DevOps Pattern)'
+        WHEN query_text ILIKE '%EXECUTE IMMEDIATE FROM%' THEN 'Deployment from File/Git'
+        WHEN query_text ILIKE '%CREATE OR REPLACE%' THEN 'Idempotent DDL'
+        ELSE 'Imperative (Standard DDL)'
+    END AS ddl_pattern,
+    COUNT(*) AS execution_count,
+    COUNT(DISTINCT user_name) AS distinct_users,
+    COUNT(DISTINCT role_name) AS distinct_roles,
+    ROUND(COUNT(*) * 100.0 / NULLIF(SUM(COUNT(*)) OVER(), 0), 1) AS pct_of_total
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+  AND query_type IN ('CREATE_TABLE','ALTER_TABLE','EXECUTE_IMMEDIATE','CREATE_VIEW','ALTER_VIEW')
+  AND execution_status = 'SUCCESS'
+GROUP BY ddl_pattern
+ORDER BY execution_count DESC
+"""
+
+_ALL_DCM_QUERIES = {
+    "rd_dcm_adoption": _SQL_DDL_PATTERNS,
+}
 
 
 def _cached_sql(cache_key, sql):
@@ -23,432 +46,81 @@ def _cached_sql(cache_key, sql):
     return df
 
 
-
-
 def comp_dcm_adoption(entry_actions=None):
-    """Database Change Management (DCM) Adoption Component
-
-    Analyzes DDL deployment patterns and categorizes them as declarative DevOps,
-    file/Git-based, or imperative standard DDL.
-
-    Args:
-        entry_actions: Optional entry actions for the component
-    """
     try:
-        st.markdown("### Database Change Management (DCM) Adoption")
+        df = _cached_sql("rd_dcm_adoption", _SQL_DDL_PATTERNS)
 
-        # DDL Deployment Pattern Analysis Expander
-        with st.expander("DDL Deployment Pattern Analysis", expanded=True):
-            st.markdown("DDL deployment pattern analysis categorizing successful CREATE/ALTER operations as declarative DevOps, file/Git-based, or imperative standard DDL by execution count and user distribution over last 30 days.")
+        if df.empty:
+            st.markdown(
+                '<div style="background-color:#fff3cd;border-left:6px solid #ffc107;padding:10px;">'
+                '⚠️&nbsp;&nbsp;No DDL deployment pattern data found for the last 30 days.</div>',
+                unsafe_allow_html=True)
+            return
 
-            # Query for DDL deployment pattern analysis
-            ddl_query = f"""
-            SELECT
-                CASE
-                    WHEN query_text ILIKE '%CREATE OR ALTER%' THEN 'Declarative (DevOps Pattern)'
-                    WHEN query_text ILIKE '%EXECUTE IMMEDIATE FROM%' THEN 'Deployment from File/Git'
-                    ELSE 'Imperative (Standard DDL)'
-                END AS ddl_pattern,
-                COUNT(*) AS execution_count,
-                COUNT(DISTINCT user_name) AS distinct_users
-            FROM SNOWFLAKE.ACCOUNT_USAGE.query_history
-            WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
-              AND query_type IN ('CREATE_TABLE', 'ALTER_TABLE', 'EXECUTE_IMMEDIATE')
-              AND execution_status = 'SUCCESS'
-            GROUP BY ALL
-            ORDER BY 2 DESC
-            """
+        df.columns = ['DDL_PATTERN', 'EXECUTION_COUNT', 'DISTINCT_USERS', 'DISTINCT_ROLES', 'PCT_OF_TOTAL']
 
+        total_ddl = int(df['EXECUTION_COUNT'].sum())
+        decl = int(df.loc[df['DDL_PATTERN'].str.contains('Declarative', case=False), 'EXECUTION_COUNT'].sum()) if any(df['DDL_PATTERN'].str.contains('Declarative', case=False)) else 0
+        git_dep = int(df.loc[df['DDL_PATTERN'].str.contains('File/Git', case=False), 'EXECUTION_COUNT'].sum()) if any(df['DDL_PATTERN'].str.contains('File/Git', case=False)) else 0
+        top_pattern = df.iloc[0]['DDL_PATTERN'] if len(df) > 0 else 'N/A'
 
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Successful DDL Ops (30d)", f"{total_ddl:,}")
+        c2.metric("Declarative DDL", f"{decl:,}")
+        c3.metric("Git-Based Deployments", f"{git_dep:,}")
+        c4.metric("Top Pattern", top_pattern[:20] + '...' if len(str(top_pattern)) > 20 else top_pattern)
 
-            try:
-                df = _cached_sql("rd_dcm_adoption", ddl_query)
-            except Exception as e:
-                # st.error(f"Error executing query: {str(e)}")
-                st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                            f'🛑&nbsp;&nbsp;Error executing query: {str(e)}'
-                            f'</div>', unsafe_allow_html=True)
-                return
+        st.markdown("")
 
-            if df.empty:
-                st.markdown('<div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                            '⚠️&nbsp;&nbsp;No DDL deployment pattern data found for the last 30 days.'
-                            '</div>', unsafe_allow_html=True)
-                return
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.markdown("**DDL Deployment Pattern Distribution (30d)**")
+            colors = [_C1, _C2, _C3, _CA][:len(df)]
+            fig = go.Figure(go.Pie(
+                labels=df['DDL_PATTERN'], values=df['EXECUTION_COUNT'],
+                hole=0.45, marker=dict(colors=colors),
+                textinfo='label+percent', textposition='outside',
+                hovertemplate='<b>%{label}</b><br>Count: %{value:,}<br>%{percent}<extra></extra>'
+            ))
+            fig.update_layout(height=400, showlegend=True,
+                              legend=dict(orientation='h', y=-0.15, x=0.5, xanchor='center'),
+                              margin=dict(t=20, b=60, l=20, r=20))
+            st.plotly_chart(fig, use_container_width=True, key="dcm_donut")
 
-            # Rename columns for display
-            df.columns = ['DDL_PATTERN', 'EXECUTION_COUNT', 'DISTINCT_USERS']
+        with col_r:
+            st.markdown("**DDL Pattern Execution Count (30d)**")
+            plot_df = df.sort_values('EXECUTION_COUNT', ascending=True)
+            colors = [_C2, _C1, _C3, _CA][:len(plot_df)]
+            fig = go.Figure(go.Bar(
+                y=plot_df['DDL_PATTERN'], x=plot_df['EXECUTION_COUNT'],
+                orientation='h', marker_color=colors[::-1],
+                text=[f"{v:,}" for v in plot_df['EXECUTION_COUNT']],
+                textposition='outside',
+                hovertemplate='<b>%{y}</b><br>Executions: %{x:,}<extra></extra>'
+            ))
+            fig.update_layout(height=400, xaxis_title='Executions', showlegend=False,
+                              margin=dict(t=20, b=50, l=200, r=50))
+            st.plotly_chart(fig, use_container_width=True, key="dcm_exec_bar")
 
-            # Render the table with Set Table and Add to Report buttons
-            _render_ddl_table(df)
+        st.markdown("**Pattern Participation Coverage (Users vs Roles)**")
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            name='Distinct Users', x=df['DDL_PATTERN'], y=df['DISTINCT_USERS'],
+            marker_color=_C1, text=df['DISTINCT_USERS'], textposition='outside'
+        ))
+        fig.add_trace(go.Bar(
+            name='Distinct Roles', x=df['DDL_PATTERN'], y=df['DISTINCT_ROLES'],
+            marker_color=_CA, text=df['DISTINCT_ROLES'], textposition='outside'
+        ))
+        fig.update_layout(barmode='group', height=400, yaxis_title='Count',
+                          legend=dict(orientation='h', y=1.1, x=0.5, xanchor='center'),
+                          margin=dict(t=40, b=100, l=50, r=50))
+        st.plotly_chart(fig, use_container_width=True, key="dcm_participation")
 
-            # Render charts (2 per row)
-            st.markdown("---")
-            _render_ddl_charts(df)
+        st.markdown("**Pattern Coverage Detail**")
+        st.dataframe(df, use_container_width=True)
 
     except Exception as e:
-        # st.error(f"Component Error: {str(e)}")
-        st.markdown(f'<div style="background-color: #FDEDEC; border-left: 6px solid #E74C3C; padding: 10px; text-align:left; margin-top: 10px; margin-bottom: 10px;">'
-                    f'🛑&nbsp;&nbsp;Component Error: {str(e)}'
-                    f'</div>', unsafe_allow_html=True)
-
-
-# ============================
-# Table with Set Table & Add to Report
-# ============================
-
-def _render_ddl_table(df):
-    """Render DDL Pattern data table."""
-    st.dataframe(df, use_container_width=True)
-
-
-# ============================
-# Chart Rendering (2 per row)
-# ============================
-
-def _render_ddl_charts(df):
-    """Render DDL Pattern charts - 2 charts per row with chart type selectors."""
-
-    col1, col2 = st.columns(2)
-
-    with col1.container():
-        st.markdown("##### Execution Count by DDL Pattern")
-        _render_execution_count_chart(df, key_prefix="exec_count_")
-
-    with col2.container():
-        st.markdown("##### Distinct Users by DDL Pattern")
-        _render_distinct_users_chart(df, key_prefix="distinct_users_")
-
-
-# ============================
-# Execution Count Chart
-# ============================
-
-def _render_execution_count_chart(df, key_prefix=""):
-    """Render execution count chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_execution_count_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_execution_count_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_execution_count_donut_chart(df, key_prefix)
-    else:
-        _render_execution_count_rose_chart(df, key_prefix)
-
-
-def _render_execution_count_bar_chart(df, key_prefix=""):
-    """Render execution count bar chart using Plotly."""
-    # Sort ascending for horizontal bar layout
-    plot_df = df.sort_values('EXECUTION_COUNT', ascending=True)
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['DDL_PATTERN'],
-            x=plot_df['EXECUTION_COUNT'],
-            orientation='h',
-            marker_color='#29B5E8',
-            text=[f"{val:,}" for val in plot_df['EXECUTION_COUNT']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Execution Count: %{x:,}<extra></extra>'
-        )
-    ])
-
-    fig.update_layout(
-        height=400,
-        xaxis_title='Execution Count',
-        yaxis_title='DDL Pattern',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}bar")
-
-
-def _render_execution_count_pie_chart(df, key_prefix=""):
-    """Render execution count pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['EXECUTION_COUNT']), "name": f"{row['DDL_PATTERN']} ({row['EXECUTION_COUNT']:,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Execution Count",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_execution_count_donut_chart(df, key_prefix=""):
-    """Render execution count donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['EXECUTION_COUNT']), "name": f"{row['DDL_PATTERN']} ({row['EXECUTION_COUNT']:,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Execution Count",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_execution_count_rose_chart(df, key_prefix=""):
-    """Render execution count rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['EXECUTION_COUNT']), "name": row['DDL_PATTERN']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Execution Count",
-            "type": "pie",
-            "radius": ["10%", "60%"],
-            "center": ["50%", "45%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
-
-
-# ============================
-# Distinct Users Chart
-# ============================
-
-def _render_distinct_users_chart(df, key_prefix=""):
-    """Render distinct users chart with selectable chart types."""
-    chart_type = st.selectbox(
-        "Change Chart Type",
-        ["Bar Chart", "Pie Chart", "Pie - Donut", "Pie - Rose Chart"],
-        index=0,
-        key=f"{key_prefix}chart_type"
-    )
-
-    if chart_type == "Bar Chart":
-        _render_distinct_users_bar_chart(df, key_prefix)
-    elif chart_type == "Pie Chart":
-        _render_distinct_users_pie_chart(df, key_prefix)
-    elif chart_type == "Pie - Donut":
-        _render_distinct_users_donut_chart(df, key_prefix)
-    else:
-        _render_distinct_users_rose_chart(df, key_prefix)
-
-
-def _render_distinct_users_bar_chart(df, key_prefix=""):
-    """Render distinct users bar chart using Plotly."""
-    # Sort ascending for horizontal bar layout
-    plot_df = df.sort_values('DISTINCT_USERS', ascending=True)
-
-    fig = go.Figure(data=[
-        go.Bar(
-            y=plot_df['DDL_PATTERN'],
-            x=plot_df['DISTINCT_USERS'],
-            orientation='h',
-            marker_color='#0077B6',
-            text=[f"{val:,}" for val in plot_df['DISTINCT_USERS']],
-            textposition='outside',
-            textfont=dict(size=10),
-            hovertemplate='<b>%{y}</b><br>Distinct Users: %{x:,}<extra></extra>'
-        )
-    ])
-
-    fig.update_layout(
-        height=400,
-        xaxis_title='Distinct Users',
-        yaxis_title='DDL Pattern',
-        showlegend=False,
-        margin=dict(t=20, b=50, l=180, r=50)
-    )
-
-    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}bar")
-
-
-def _render_distinct_users_pie_chart(df, key_prefix=""):
-    """Render distinct users pie chart using ECharts."""
-    chart_data = [
-        {"value": int(row['DISTINCT_USERS']), "name": f"{row['DDL_PATTERN']} ({row['DISTINCT_USERS']:,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Distinct Users",
-            "type": "pie",
-            "radius": ["0%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}pie")
-
-
-def _render_distinct_users_donut_chart(df, key_prefix=""):
-    """Render distinct users donut chart using ECharts."""
-    chart_data = [
-        {"value": int(row['DISTINCT_USERS']), "name": f"{row['DDL_PATTERN']} ({row['DISTINCT_USERS']:,})"}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {d}%"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Distinct Users",
-            "type": "pie",
-            "radius": ["30%", "55%"],
-            "center": ["50%", "40%"],
-            "itemStyle": {"borderRadius": 8},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}donut")
-
-
-def _render_distinct_users_rose_chart(df, key_prefix=""):
-    """Render distinct users rose chart using ECharts."""
-    chart_data = [
-        {"value": int(row['DISTINCT_USERS']), "name": row['DDL_PATTERN']}
-        for _, row in df.iterrows()
-    ]
-
-    option = {
-        "legend": {
-            "bottom": "5",
-            "left": "center",
-            "orient": "horizontal",
-            "itemGap": 5,
-            "itemWidth": 10,
-            "textStyle": {"fontSize": 9}
-        },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
-        "toolbox": {
-            "show": True,
-            "feature": {
-                "dataView": {"show": True, "readOnly": False},
-                "restore": {"show": True},
-                "saveAsImage": {"show": True}
-            }
-        },
-        "series": [{
-            "name": "Distinct Users",
-            "type": "pie",
-            "radius": ["10%", "60%"],
-            "center": ["50%", "45%"],
-            "roseType": "area",
-            "itemStyle": {"borderRadius": 5},
-            "data": chart_data
-        }]
-    }
-
-    st_echarts(options=option, height="400px", key=f"{key_prefix}rose")
+        st.markdown(
+            f'<div style="background-color:#FDEDEC;border-left:6px solid {_CA};padding:10px;">'
+            f'Error: {str(e)}</div>', unsafe_allow_html=True)
