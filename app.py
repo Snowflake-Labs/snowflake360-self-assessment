@@ -17,14 +17,16 @@ try:
     import core as cr
     from components.local import load_catalog
     from components.Analysis.invoke_metrics_comps import get_analysis_comp_handler
-    from components.Access_Control.access_control_overview import _prefetch_all_ac_queries
-    from components.Virtual_Warehouses.warehouse_overview import _prefetch_all_wh_queries
-    from components.Data_Ingestion.ingestion_overview import _prefetch_all_ingestion_queries
-    from components.FinOps_Lite.finops_overview import _prefetch_all_finops_queries
-    from components.Data_Recovery_DevOps.recovery_devops_overview import _prefetch_all_devops_queries
-    from components.Data_Transformation.transformation_overview import _prefetch_all_tf_queries
-    from components.Data_Governance_New.governance_overview import _prefetch_all_governance_queries
-    from components.Database_Management.db_overview import prefetch_db_overview_queries
+    import pandas as _pd
+    from components.Access_Control._all_ac_queries import _ALL_AC_QUERIES
+    from components.Virtual_Warehouses.warehouse_overview import _ALL_WH_QUERIES
+    from components.Data_Ingestion.ingestion_overview import _ALL_INGESTION_QUERIES
+    from components.FinOps_Lite._all_finops_queries import _ALL_FINOPS_QUERIES
+    from components.Data_Recovery_DevOps.recovery_devops_overview import _ALL_DEVOPS_QUERIES
+    from components.Data_Transformation._all_tf_queries import _ALL_TF_QUERIES
+    from components.Data_Governance_New._dg_queries import ALL_DG_QUERIES
+    from components.Database_Management._db_queries import ALL_DB_OVERVIEW_QUERIES
+    from components.Database_Management.db_overview import _query_cache as _DB_QUERY_CACHE
     from core.config.design_tokens import (
         BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY,
         SURFACE_ALT, SURFACE_BASE,
@@ -391,6 +393,8 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
         _run_clicked = st.button("Run Charts", key="_run_charts_btn", type="primary",
                                  disabled=st.session_state._charts_running)
 
+    _run_status_ph = st.empty()
+
     _selected_topics = []
     if _all_charts:
         _selected_topics = [t for t, _ in _features]
@@ -402,43 +406,132 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
 
     st.session_state['_chart_sel'] = set(_selected_topics)
 
-    _TOPIC_PREFETCH_FNS = {
-        "Access Control": _prefetch_all_ac_queries,
-        "Virtual Warehouses": _prefetch_all_wh_queries,
-        "Data Ingestion": _prefetch_all_ingestion_queries,
-        "FinOps (lite)": _prefetch_all_finops_queries,
-        "Data Recovery & DevOps": _prefetch_all_devops_queries,
-        "Data Transformation": _prefetch_all_tf_queries,
-        "Data Governance": _prefetch_all_governance_queries,
-        "Database Management": prefetch_db_overview_queries,
+    _TOPIC_QUERY_DICTS = {
+        "Database Management": ALL_DB_OVERVIEW_QUERIES,
+        "Data Governance": ALL_DG_QUERIES,
+        "Virtual Warehouses": _ALL_WH_QUERIES,
+        "Access Control": _ALL_AC_QUERIES,
+        "Data Ingestion": _ALL_INGESTION_QUERIES,
+        "Data Transformation": _ALL_TF_QUERIES,
+        "FinOps (lite)": _ALL_FINOPS_QUERIES,
+        "Data Recovery & DevOps": _ALL_DEVOPS_QUERIES,
     }
 
     if _run_clicked and _selected_topics:
         st.session_state._charts_running = True
-        _to_prefetch = {t: _TOPIC_PREFETCH_FNS[t] for t in _selected_topics if t in _TOPIC_PREFETCH_FNS}
-        _total = len(_to_prefetch)
-        if _total > 0:
-            _prog = st.progress(0, text=f"Loading {_total} topic(s) in parallel...")
+        _session = st.session_state.get("session")
 
-            def _run_one(topic, fn):
+        _topic_counts = {}
+        _per_topic_jobs = {}
+        for _t in _selected_topics:
+            _qdict = _TOPIC_QUERY_DICTS.get(_t, {})
+            if _t == "Database Management":
+                _needed = {k: v for k, v in _qdict.items() if k not in _DB_QUERY_CACHE}
+            else:
+                _needed = {k: v for k, v in _qdict.items() if k not in st.session_state}
+            _n = len(_needed)
+            _topic_counts[_t] = {"total": _n, "done": 0}
+            if _n == 0:
+                st.session_state._charts_completed.add(_t)
+            else:
+                _per_topic_jobs.setdefault(_t, []).extend([(_t, _k, _sql) for _k, _sql in _needed.items()])
+
+        _all_jobs = []
+        if _per_topic_jobs:
+            _max_len = max(len(v) for v in _per_topic_jobs.values())
+            for _idx in range(_max_len):
+                for _t in _selected_topics:
+                    _tl = _per_topic_jobs.get(_t, [])
+                    if _idx < len(_tl):
+                        _all_jobs.append(_tl[_idx])
+
+        _total_q = sum(tc["total"] for tc in _topic_counts.values())
+        _done_q = 0
+
+        def _make_status_html(topic_counts, done_total, q_total, finished=False):
+            _CT = BRAND_PRIMARY
+            _CB = BRAND_SECONDARY
+            overall_pct = int(done_total / q_total * 100) if q_total > 0 else 100
+            if finished:
+                hdr = (
+                    f'<p style="color:{_CT};font-weight:600;font-size:0.9rem;margin:0 0 4px 0;">'
+                    f'&#10003;&nbsp;All charts loaded!</p>'
+                )
+            else:
+                hdr = (
+                    f'<p style="color:{_CT};font-weight:600;font-size:0.9rem;margin:0 0 4px 0;">'
+                    f'Loading charts&hellip;&nbsp;&nbsp;{done_total}&nbsp;/&nbsp;{q_total} queries complete</p>'
+                )
+            overall_bar = (
+                f'<div style="background:#e8edf2;border-radius:4px;height:6px;margin-bottom:12px;">'
+                f'<div style="background:{_CB};width:{overall_pct}%;height:6px;border-radius:4px;">'
+                f'</div></div>'
+            )
+            rows = ''
+            for _ft, _ in _features:
+                if _ft not in topic_counts:
+                    continue
+                tc = topic_counts[_ft]
+                t_done = tc["done"]
+                t_total = tc["total"]
+                t_pct = int(t_done / t_total * 100) if t_total > 0 else 100
+                is_done = t_done >= t_total
+                lbl = f'&#10003;&nbsp;{_ft}' if is_done else _ft
+                cnt_txt = f'{t_done}&nbsp;/&nbsp;{t_total}' if t_total > 0 else 'cached'
+                rows += (
+                    f'<div style="margin-bottom:6px;">'
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'font-size:0.8rem;color:{_CT};margin-bottom:2px;'
+                    f'font-weight:{"600" if is_done else "400"};">'
+                    f'<span>{lbl}</span>'
+                    f'<span style="font-size:0.75rem;color:#888;">{cnt_txt}</span></div>'
+                    f'<div style="background:#e8edf2;border-radius:4px;height:5px;">'
+                    f'<div style="background:{_CB};width:{t_pct}%;height:5px;border-radius:4px;">'
+                    f'</div></div></div>'
+                )
+            return f'<div style="margin:10px 0;">{hdr}{overall_bar}{rows}</div>'
+
+        _run_status_ph.markdown(
+            _make_status_html(_topic_counts, _done_q, _total_q),
+            unsafe_allow_html=True,
+        )
+
+        if _all_jobs and _session:
+            def _exec_query(_key, _sql):
                 try:
-                    fn()
+                    return _key, _session.sql(_sql).to_pandas()
                 except Exception:
-                    pass
-                return topic
+                    return _key, _pd.DataFrame()
 
-            _futures = {}
-            with ThreadPoolExecutor(max_workers=_total) as _exec:
-                for _t, _fn in _to_prefetch.items():
-                    _futures[_exec.submit(_run_one, _t, _fn)] = _t
-                for _i, _fut in enumerate(as_completed(_futures), 1):
-                    _done_topic = _fut.result()
-                    st.session_state._charts_completed.add(_done_topic)
-                    _prog.progress(_i / _total, text=f"Loaded: {_done_topic} ({_i}/{_total})")
+            with ThreadPoolExecutor(max_workers=len(_all_jobs)) as _exec:
+                _job_meta = {
+                    _exec.submit(_exec_query, _k, _sql): (_t, _k)
+                    for _t, _k, _sql in _all_jobs
+                }
+                for _fut in as_completed(_job_meta):
+                    _jt, _jk = _job_meta[_fut]
+                    _rk, _df = _fut.result()
+                    if _jt == "Database Management":
+                        _DB_QUERY_CACHE[_rk] = _df
+                    else:
+                        st.session_state[_rk] = _df
+                    _topic_counts[_jt]["done"] += 1
+                    _done_q += 1
+                    if _topic_counts[_jt]["done"] >= _topic_counts[_jt]["total"]:
+                        st.session_state._charts_completed.add(_jt)
+                        st.session_state[f"_topic_ready_{_nav_key(_jt)}"] = True
+                    _run_status_ph.markdown(
+                        _make_status_html(_topic_counts, _done_q, _total_q),
+                        unsafe_allow_html=True,
+                    )
 
-            _prog.progress(1.0, text="All topics loaded!")
-            _time.sleep(1)
-            _prog.empty()
+        _run_status_ph.markdown(
+            _make_status_html(_topic_counts, _total_q, _total_q, finished=True),
+            unsafe_allow_html=True,
+        )
+        st.snow()
+        _time.sleep(2)
+        _run_status_ph.empty()
         st.session_state._charts_running = False
         st.experimental_rerun()
 
@@ -463,33 +556,40 @@ else:
             unsafe_allow_html=True
         )
     with _hdr_right:
-        if selected_menu in TOPIC_EXPORTERS and st.session_state.get(f"_topic_ready_{_nav_key(selected_menu)}", False):
-            st.markdown('<span class="telemetry-btn-anchor"></span>', unsafe_allow_html=True)
-            _export_key = f"export_{_nav_key(selected_menu)}"
-            if st.button("Export Telemetry for Printing", key=_export_key, type="secondary"):
-                _exp_ph = st.empty()
-                try:
-                    with _exp_ph.container():
-                        with st.spinner("Generating export..."):
-                            _account = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
-                            _html_content = TOPIC_EXPORTERS[selected_menu](_account)
-                    _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
-                    _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-                    import base64
-                    _b64 = base64.b64encode(_html_content.encode()).decode()
-                    _exp_ph.empty()
-                    components.html(f"""<script>
-                    var a=document.createElement('a');
-                    a.href='data:text/html;base64,{_b64}';
-                    a.download='{_fname}';
-                    document.body.appendChild(a);a.click();document.body.removeChild(a);
-                    </script>""", height=0)
-                except Exception as _exp_err:
-                    _exp_ph.error(f"Export failed: {_exp_err}")
+        if selected_menu in TOPIC_EXPORTERS and (
+            st.session_state.get(f"_topic_ready_{_nav_key(selected_menu)}", False)
+            or selected_menu in st.session_state._charts_completed
+        ):
+            try:
+                st.markdown('<span class="telemetry-btn-anchor"></span>', unsafe_allow_html=True)
+                _export_key = f"export_{_nav_key(selected_menu)}"
+                _safe_topic = selected_menu.replace(" ", "_").replace("&", "and").replace("(", "").replace(")", "")
+                _fname = f"Snowflake_Telemetry_{_safe_topic}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                if not st.session_state.get("_sf_account_name"):
+                    st.session_state._sf_account_name = st.session_state.session.sql("SELECT CURRENT_ACCOUNT_NAME()").collect()[0][0]
+                import base64 as _b64mod
+                _html_bytes = TOPIC_EXPORTERS[selected_menu](st.session_state._sf_account_name).encode("utf-8")
+                _b64 = _b64mod.b64encode(_html_bytes).decode("ascii")
+                _dl_html = (
+                    "<style>body{margin:0;padding:2px 0}"
+                    "a{display:inline-block;padding:5px 14px;"
+                    "background:#003D73;color:#fff!important;"
+                    "border-radius:4px;text-decoration:none;"
+                    "font:500 13px -apple-system,sans-serif;cursor:pointer}"
+                    "a:hover{background:#11567F}</style>"
+                    f'<a href="data:text/html;base64,{_b64}" download="{_fname}">'
+                    "Export Telemetry for Printing</a>"
+                )
+                components.html(_dl_html, height=36)
+            except Exception as _exp_err:
+                st.error(f"Export unavailable: {_exp_err}")
 
     if selected_menu in loaded_catalog:
         available_tabs = [m['tab_name'] for m in loaded_catalog[selected_menu]]
         if available_tabs:
+            _is_first_visit = not st.session_state.get(f"_topic_ready_{_nav_key(selected_menu)}", False)
+            if _is_first_visit:
+                st.session_state[f"_topic_ready_{_nav_key(selected_menu)}"] = True
             _cycle = st.session_state.topic_nav_count % 20
             for _ in range(_cycle):
                 st.empty()
@@ -515,8 +615,8 @@ else:
                             f'Error loading {tab_name}: {str(e)}</div>',
                             unsafe_allow_html=True
                         )
-            if not st.session_state.get(f"_topic_ready_{_nav_key(selected_menu)}", False):
-                st.session_state[f"_topic_ready_{_nav_key(selected_menu)}"] = True
+            if _is_first_visit:
+                st.session_state._charts_completed.add(selected_menu)
                 st.experimental_rerun()
 
 st.markdown(global_settings.APP_VERSION_FOOTER, unsafe_allow_html=True)

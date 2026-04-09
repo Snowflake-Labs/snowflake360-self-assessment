@@ -205,6 +205,28 @@ GROUP BY SERVICE_TYPE
 ORDER BY TOTAL_COST_USD DESC
 """
 
+_SQL_COST_ANOMALIES = f"""
+SELECT
+    ad.date AS ANOMALY_DATE,
+    ad.anomaly_id AS ANOMALY_ID,
+    ROUND(ad.actual_value, 2) AS ACTUAL_CREDITS,
+    ROUND(ad.forecasted_value, 2) AS EXPECTED_CREDITS,
+    ROUND(ad.actual_value * {CREDIT_COST}, 2) AS ACTUAL_COST_USD,
+    ROUND(ad.forecasted_value * {CREDIT_COST}, 2) AS EXPECTED_COST_USD,
+    ROUND((ad.actual_value - ad.forecasted_value) * {CREDIT_COST}, 2) AS ESTIMATED_OVERSPEND_USD,
+    ROUND(((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100, 1) AS DEVIATION_PCT,
+    CASE
+        WHEN ((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100 > 100 THEN 'CRITICAL'
+        WHEN ((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100 > 50  THEN 'HIGH'
+        WHEN ((ad.actual_value - ad.forecasted_value) / NULLIF(ad.forecasted_value, 0)) * 100 > 25  THEN 'MODERATE'
+        ELSE 'LOW'
+    END AS SEVERITY
+FROM SNOWFLAKE.ACCOUNT_USAGE.ANOMALIES_DAILY ad
+WHERE ad.date >= DATEADD('day', -60, CURRENT_TIMESTAMP())
+  AND ad.is_anomaly = TRUE
+ORDER BY ad.date ASC
+"""
+
 _SQL_WH_EAC_FORECAST = f"""
 WITH wh_monthly AS (
     SELECT WAREHOUSE_NAME,
@@ -232,6 +254,7 @@ LIMIT 30
 """
 
 _ALL_VIS_QUERIES = {
+    "fv_cost_anomalies": _SQL_COST_ANOMALIES,
     "fv_exec_forecast": _SQL_EXEC_FORECAST,
     "fv_compute_breakdown": _SQL_COMPUTE_BREAKDOWN,
     "fv_costliest_queries": _SQL_COSTLIEST_QUERIES,
@@ -295,6 +318,10 @@ def comp_finops_visibility(entry_actions=None):
         with st.expander("Daily Cost Trend (30 Days) with 7-Day Moving Average", expanded=True):
             st.markdown("Daily compute + cloud services cost with 7-day rolling average to smooth noise.")
             _render_daily_cost_trend()
+
+        with st.expander("Account-Level Cost Anomalies (Last 60 Days)", expanded=True):
+            st.markdown("ML-detected spending anomalies: actual vs expected credits with deviation % from forecast.")
+            _render_cost_anomalies()
 
         with st.expander("Query Cost Attribution (By User)", expanded=True):
             st.markdown("Attributed compute cost by user over the last 30 days.")
@@ -631,6 +658,63 @@ def _render_service_type_cost():
             textinfo='percent', textposition='inside',
         )])
         fig2.update_layout(height=400, margin=dict(t=10, b=10, l=10, r=10))
+        st.plotly_chart(fig2, use_container_width=True)
+    st.dataframe(df, use_container_width=True)
+
+
+def _render_cost_anomalies():
+    df = _cached_sql("fv_cost_anomalies", _SQL_COST_ANOMALIES)
+    if df.empty:
+        st.info("No cost anomalies detected in the last 60 days.")
+        return
+    total_anomalies = len(df)
+    total_overspend = float(df["ESTIMATED_OVERSPEND_USD"].sum())
+    max_deviation = float(df["DEVIATION_PCT"].max())
+    critical_count = int((df["SEVERITY"] == "CRITICAL").sum())
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Anomaly Days (60d)", total_anomalies)
+    c2.metric("Total Overspend", f"${total_overspend:,.2f}")
+    c3.metric("Max Deviation", f"{max_deviation:.1f}%")
+    c4.metric("Critical Days", critical_count)
+    _sev_color = {"CRITICAL": _CA, "HIGH": _CA, "MODERATE": _C3, "LOW": _C1}
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.markdown("##### Actual vs Expected Daily Cost (Anomaly Days)")
+        actual_colors = [_sev_color.get(str(s), _C1) for s in df["SEVERITY"].tolist()]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=df["ANOMALY_DATE"].tolist(),
+            y=df["ACTUAL_COST_USD"].tolist(),
+            name="Actual Cost ($)",
+            marker_color=actual_colors,
+            text=[f"+{d:.0f}%" for d in df["DEVIATION_PCT"].tolist()],
+            textposition="outside",
+        ))
+        fig.add_trace(go.Bar(
+            x=df["ANOMALY_DATE"].tolist(),
+            y=df["EXPECTED_COST_USD"].tolist(),
+            name="Expected Cost ($)",
+            marker_color=_C2,
+        ))
+        fig.update_layout(
+            barmode="group", height=420,
+            margin=dict(t=30, b=40, l=60, r=20),
+            xaxis_title="", yaxis_title="Cost (USD)",
+            legend=dict(orientation="h", y=1.05, x=0, xanchor="left"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        st.markdown("##### Anomalies by Severity")
+        sev_counts = df["SEVERITY"].value_counts().reset_index()
+        sev_counts.columns = ["SEVERITY", "COUNT"]
+        fig2 = go.Figure(data=[go.Pie(
+            labels=sev_counts["SEVERITY"].tolist(),
+            values=sev_counts["COUNT"].tolist(),
+            hole=0.45,
+            marker=dict(colors=[_sev_color.get(str(s), _C1) for s in sev_counts["SEVERITY"].tolist()]),
+            textinfo="percent+label", textposition="inside",
+        )])
+        fig2.update_layout(height=420, margin=dict(t=10, b=10, l=10, r=10), showlegend=False)
         st.plotly_chart(fig2, use_container_width=True)
     st.dataframe(df, use_container_width=True)
 

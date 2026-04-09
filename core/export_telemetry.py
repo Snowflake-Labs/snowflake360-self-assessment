@@ -112,14 +112,15 @@ def _fmt_num(val: Any, decimals: int = 2) -> str:
         return str(val)
 
 
-def _make_doughnut(chart_id: str, labels: list, data: list, colors: list | None = None) -> str:
+def _make_doughnut(chart_id: str, labels: list, data: list, colors: list | None = None, title: str = "") -> str:
     colors = colors or _COLORS[: len(data)]
     cfg = json.dumps({
         "labels": labels,
         "datasets": [{"data": data, "backgroundColor": colors}],
     })
+    _title = title or (labels[0] if len(labels) == 1 else "")
     return f"""<div class="chart-block">
-    <div class="chart-title">{_esc(labels[0] if len(labels) == 1 else "")}</div>
+    <div class="chart-title">{_esc(_title)}</div>
     <div style="position:relative;height:274px;width:100%;">
         <canvas id="{chart_id}"></canvas>
     </div>
