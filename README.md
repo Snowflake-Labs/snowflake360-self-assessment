@@ -124,18 +124,70 @@ GRANT CREATE STAGE     ON SCHEMA <database>.<schema> TO ROLE <role>;
 
 ---
 
+## Prerequisites
+
+### Snowflake CLI (Option A only)
+
+The scripted install requires the **Snowflake CLI (`snow`)** version 2.x or later.
+
+Install it:
+```bash
+# macOS
+brew install snowflake-cli
+
+# pip (any OS)
+pip install snowflake-cli
+
+# Verify
+snow --version
+```
+
+Then configure a connection:
+```bash
+snow connection add
+# Follow the prompts — account, user, role, warehouse
+
+snow connection test --connection <name>
+# Should print: ✓ Connection successful
+```
+
+Full docs: https://docs.snowflake.com/en/developer-guide/snowflake-cli/installation/installation
+
+### Role
+
+The role you specify must **already exist** in Snowflake. The install scripts do **not** create roles.
+
+- Default is `ACCOUNTADMIN` — it always exists and has all required privileges
+- If using a custom role, create it first and ensure it has `CREATE WAREHOUSE`, `CREATE DATABASE` privileges (or pre-create the warehouse/database yourself)
+
+---
+
+## What the Install Scripts Create
+
+| Object | Created by script? | Notes |
+|---|---|---|
+| Warehouse | ✅ Yes (`CREATE WAREHOUSE IF NOT EXISTS`) | XSMALL, auto-suspend 120s |
+| Database | ✅ Yes (`CREATE DATABASE IF NOT EXISTS`) | |
+| Schema | ✅ Yes (`CREATE SCHEMA IF NOT EXISTS`) | |
+| Stage | ✅ Yes | Hosts app source files |
+| Streamlit app | ✅ Yes | Shell created; files uploaded separately in Option A |
+| Role | ❌ No — must pre-exist | Default `ACCOUNTADMIN` always exists |
+| Privileges/grants | ✅ Yes | ACCOUNT_USAGE, CORTEX_USER, USAGE, CREATE STREAMLIT |
+
+---
+
 ## Installation
 
 Two options are provided. Both produce the same result.
 
 ### Option A — Scripted install (Snowflake CLI)
 
-Requires `snow` CLI ≥ 2.x configured with a valid connection.
+Requires `snow` CLI ≥ 2.x configured with a valid connection (see Prerequisites above).
 
 ```bash
 # Clone the repo
-git clone <repo-url>
-cd s360_self_assessment
+git clone https://github.com/Snowflake-Solutions/s360-self-serve.git
+cd s360-self-serve
 
 # First-time install (creates warehouse, database, schema, grants, deploys app)
 ./scripts/deploy.sh --connection <connection_name>
