@@ -461,6 +461,7 @@ def export_database_management(account_name: str) -> str:
     df_dbc       = _qc("db_overview_13_db_churn_query")              # DATABASE_NAME, TABLE_COUNT, TOTAL_CHURN_TB, AVG_CHURN_RATIO
     df_sav       = _qc("db_overview_25_savings_actions_query")       # OPTIMIZATION_ACTION, AFFECTED_TABLES, POTENTIAL_SAVINGS_TB, EST_MONTHLY_SAVINGS_USD
     df_obj       = _qc("db_overview_14_object_count_query")          # OBJECT_TYPE, OBJECT_COUNT
+    df_obj_exp   = _qc("db_overview_26_expanded_object_count_query") # OBJECT_TYPE, OBJECT_COUNT
     df_cc        = _qc("db_overview_23_clustering_detail_query")     # TABLE_NAME, CLUSTERING_CREDITS, AVG_CREDITS_PER_DAY, AUTO_CLUSTERING_ON
     df_churn_det = _qc("db_overview_12_detail_query")                # TABLE_NAME, TABLE_TYPE, ACTIVE_DATA_GB, TIME_TRAVEL_GB, FAILSAFE_GB, TOTAL_CHURN_GB, CHURN_RATIO
 
@@ -554,6 +555,34 @@ def export_database_management(account_name: str) -> str:
             ds_html += _make_table(hdr_cols, df_top.head(50)[raw_cols].values.tolist())
 
     sub_sections.append(build_sub_section("Database Storage", kpis=ds_kpis, charts_html=ds_html))
+
+    # ── Database Object Count ─────────────────────────────────────────────
+    _OBJ_COLORS = ["#11567F", "#725AA3", "#FF9F36", "#75CDD7", "#29B5E8", "#5B5B5B"]
+    obj_tile_html = ""
+    if not df_obj_exp.empty and "OBJECT_TYPE" in df_obj_exp.columns and "OBJECT_COUNT" in df_obj_exp.columns:
+        df_sorted = df_obj_exp.sort_values("OBJECT_COUNT", ascending=False)
+        n_cols = 4
+        tile_css = (
+            "display:grid;"
+            f"grid-template-columns:repeat({n_cols},1fr);"
+            "gap:8px;padding:8px 0;"
+        )
+        tiles_inner = ""
+        for i, (_, row) in enumerate(df_sorted.iterrows()):
+            bg = _OBJ_COLORS[i % len(_OBJ_COLORS)]
+            obj_type = _esc(str(row["OBJECT_TYPE"]))
+            count = f"{int(row['OBJECT_COUNT']):,}"
+            tiles_inner += (
+                f'<div style="background:{bg};color:#fff;border-radius:6px;'
+                f'padding:14px 10px;text-align:center;min-height:72px;'
+                f'display:flex;flex-direction:column;justify-content:center;">'
+                f'<div style="font-size:11px;font-weight:700;margin-bottom:4px;">{obj_type}</div>'
+                f'<div style="font-size:22px;font-weight:800;">{count}</div>'
+                f'</div>'
+            )
+        obj_tile_html = _full_wrap(f'<div style="{tile_css}">{tiles_inner}</div>')
+
+    sub_sections.append(build_sub_section("Database Object Count", kpis=[], charts_html=obj_tile_html))
 
     # ── Clustering ────────────────────────────────────────────────────────
     cl_kpis = []
