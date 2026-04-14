@@ -146,6 +146,45 @@ def _plotly_pie(values, names, colors, title=""):
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _plotly_object_heatmap(df, title="Database Object Counts"):
+    BRAND_COLORS = ["#11567F", "#725AA3", "#FF9F36", "#75CDD7", "#29B5E8", "#5B5B5B"]
+    df_sorted = df.sort_values("OBJECT_COUNT", ascending=False)
+    objects = df_sorted["OBJECT_TYPE"].tolist()
+    counts = df_sorted["OBJECT_COUNT"].tolist()
+    n_cols = 4
+    n_rows = (len(objects) + n_cols - 1) // n_cols
+    fig = go.Figure()
+    for idx, (obj_type, count) in enumerate(zip(objects, counts)):
+        row = idx // n_cols
+        col = idx % n_cols
+        bg_color = BRAND_COLORS[idx % len(BRAND_COLORS)]
+        fig.add_shape(
+            type="rect",
+            x0=col, x1=col + 0.95,
+            y0=n_rows - row - 1, y1=n_rows - row - 0.05,
+            fillcolor=bg_color,
+            line=dict(color="white", width=2),
+        )
+        fig.add_annotation(
+            x=col + 0.475,
+            y=n_rows - row - 0.5,
+            text=f"<b>{obj_type}</b><br>{count:,}",
+            showarrow=False,
+            font=dict(size=13, color="white"),
+            xref="x", yref="y",
+        )
+    fig.update_layout(
+        title=title,
+        height=max(200, n_rows * 110),
+        margin=dict(l=10, r=10, t=40, b=10),
+        xaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[-0.1, n_cols]),
+        yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, range=[-0.1, n_rows]),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def _render_overview_subtab():
     try:
         session = st.session_state.session
@@ -211,6 +250,16 @@ def _render_overview_subtab():
             )
         else:
             _no_data_info("No database storage data found.")
+
+        st.divider()
+
+        st.subheader("Database Object Count")
+        exp_obj_df = _cached_query(session, "db_overview_26_expanded_object_count_query",
+                                   ALL_DB_OVERVIEW_QUERIES["db_overview_26_expanded_object_count_query"])
+        if len(exp_obj_df) > 0:
+            _plotly_object_heatmap(exp_obj_df, title="Database Object Counts")
+        else:
+            _no_data_info("No object count data found.")
 
     except Exception as e:
         _error_box("Overview tab error", e)
