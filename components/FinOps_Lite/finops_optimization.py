@@ -9,17 +9,24 @@ _C3 = '#75C2D8'
 _CA = '#E8A229'
 
 
+def _get_credit_rate():
+    return float(st.session_state.get("rate_credit", 3.0))
+
+
 def _cached_sql(cache_key, sql):
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
+    credit_rate = _get_credit_rate()
+    keyed = f"{cache_key}_{credit_rate}"
+    if keyed in st.session_state:
+        return st.session_state[keyed]
     session = st.session_state.get("session")
     if not session:
         return pd.DataFrame()
     try:
-        df = session.sql(sql).to_pandas()
+        formatted = sql.format(CREDIT_COST=credit_rate)
+        df = session.sql(formatted).to_pandas()
     except Exception:
         df = pd.DataFrame()
-    st.session_state[cache_key] = df
+    st.session_state[keyed] = df
     return df
 
 
@@ -45,7 +52,7 @@ WITH pattern_summary AS (
 )
 SELECT pattern AS PATTERN,
        ROUND(credits, 4) AS CLOUD_SERVICES_CREDITS_30D,
-       ROUND(credits * 3.00, 2) AS ESTIMATED_COST_USD,
+       ROUND(credits * {CREDIT_COST}, 2) AS ESTIMATED_COST_USD,
        ROUND(RATIO_TO_REPORT(credits) OVER () * 100, 1) AS PCT_OF_OVERHEAD
 FROM pattern_summary WHERE credits > 0
 ORDER BY credits DESC

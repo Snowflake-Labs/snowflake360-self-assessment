@@ -7,25 +7,32 @@ _C1 = '#29B5E8'
 _C2 = '#11567F'
 _C3 = '#75C2D8'
 _CA = '#E8A229'
-CREDIT_COST = 3.0
-COST_PER_TB = 23.0
+def _get_rates():
+    return (
+        float(st.session_state.get("rate_credit", 3.0)),
+        float(st.session_state.get("rate_storage", 23.0)),
+        float(st.session_state.get("rate_transfer", 0.0)),
+    )
 
 
 def _cached_sql(cache_key, sql):
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
+    credit_rate, storage_rate, _ = _get_rates()
+    keyed = f"{cache_key}_{credit_rate}_{storage_rate}"
+    if keyed in st.session_state:
+        return st.session_state[keyed]
     session = st.session_state.get("session")
     if not session:
         return pd.DataFrame()
     try:
-        df = session.sql(sql).to_pandas()
+        formatted = sql.format(CREDIT_COST=credit_rate, COST_PER_TB=storage_rate)
+        df = session.sql(formatted).to_pandas()
     except Exception:
         df = pd.DataFrame()
-    st.session_state[cache_key] = df
+    st.session_state[keyed] = df
     return df
 
 
-_SQL_EXEC_FORECAST = f"""
+_SQL_EXEC_FORECAST = """
 WITH compute_cost AS (
     SELECT 'Compute (Warehouse)' AS category,
            SUM(CREDITS_USED_COMPUTE) * {CREDIT_COST} AS cost_last_30d
@@ -67,7 +74,7 @@ FROM unioned
 ORDER BY cost_last_30d DESC
 """
 
-_SQL_COMPUTE_BREAKDOWN = f"""
+_SQL_COMPUTE_BREAKDOWN = """
 WITH resource_metrics AS (
     SELECT 'WAREHOUSE' AS service_type, WAREHOUSE_NAME AS resource_name,
            SUM(CREDITS_USED) AS credits_last_30d
@@ -95,7 +102,7 @@ ORDER BY COST_LAST_30D DESC
 LIMIT 20
 """
 
-_SQL_COSTLIEST_QUERIES = f"""
+_SQL_COSTLIEST_QUERIES = """
 WITH query_costs AS (
     SELECT query_id, user_name, warehouse_name,
            ROUND(credits_attributed_compute, 4) AS credits_used,
@@ -114,7 +121,7 @@ ORDER BY qc.query_cost_usd DESC
 LIMIT 20
 """
 
-_SQL_USER_COST_ATTRIBUTION = f"""
+_SQL_USER_COST_ATTRIBUTION = """
 SELECT
     user_name AS USER_NAME,
     COUNT(DISTINCT query_id) AS QUERY_COUNT,
@@ -129,7 +136,7 @@ ORDER BY TOTAL_COST_USD DESC
 LIMIT 20
 """
 
-_SQL_STORAGE_BY_DB = f"""
+_SQL_STORAGE_BY_DB = """
 WITH latest_storage AS (
     SELECT database_name, usage_date, average_database_bytes,
            ROW_NUMBER() OVER (PARTITION BY database_name ORDER BY usage_date DESC) AS rn
@@ -159,7 +166,7 @@ GROUP BY DATE_TRUNC('month', START_TIME)
 ORDER BY MONTH
 """
 
-_SQL_DAILY_COST_TREND = f"""
+_SQL_DAILY_COST_TREND = """
 SELECT
     DATE(START_TIME) AS USAGE_DATE,
     ROUND(SUM(CREDITS_USED_COMPUTE), 2) AS COMPUTE_CREDITS,
@@ -187,7 +194,7 @@ GROUP BY target_cloud, transfer_type
 ORDER BY GB_TRANSFERRED DESC
 """
 
-_SQL_SERVICE_TYPE_COST = f"""
+_SQL_SERVICE_TYPE_COST = """
 SELECT
     SERVICE_TYPE,
     ROUND(SUM(CREDITS_USED), 2) AS TOTAL_CREDITS,
@@ -205,7 +212,7 @@ GROUP BY SERVICE_TYPE
 ORDER BY TOTAL_COST_USD DESC
 """
 
-_SQL_COST_ANOMALIES = f"""
+_SQL_COST_ANOMALIES = """
 SELECT
     ad.date AS ANOMALY_DATE,
     ad.anomaly_id AS ANOMALY_ID,
@@ -227,7 +234,7 @@ WHERE ad.date >= DATEADD('day', -60, CURRENT_TIMESTAMP())
 ORDER BY ad.date ASC
 """
 
-_SQL_WH_EAC_FORECAST = f"""
+_SQL_WH_EAC_FORECAST = """
 WITH wh_monthly AS (
     SELECT WAREHOUSE_NAME,
            ROUND(SUM(CREDITS_USED) * {CREDIT_COST}, 0) AS monthly_cost
@@ -279,7 +286,12 @@ def _prefetch():
     session = st.session_state.get("session")
     if not session:
         return
-    needed = {k: sql for k, sql in _ALL_VIS_QUERIES.items() if k not in st.session_state}
+    credit_rate, storage_rate, _ = _get_rates()
+    needed = {}
+    for k, sql in _ALL_VIS_QUERIES.items():
+        rate_key = f"{k}_{credit_rate}_{storage_rate}"
+        if rate_key not in st.session_state:
+            needed[rate_key] = sql.format(CREDIT_COST=credit_rate, COST_PER_TB=storage_rate)
     if not needed:
         return
     with ThreadPoolExecutor(max_workers=6) as executor:

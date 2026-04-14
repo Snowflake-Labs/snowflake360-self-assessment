@@ -501,14 +501,14 @@ AND (sm.time_travel_bytes + sm.failsafe_bytes) > 0
             'Convert high-churn tables to TRANSIENT' AS optimization_action,
             COUNT(CASE WHEN potential_failsafe_savings_bytes > 0 THEN 1 END) AS affected_tables,
             ROUND(SUM(potential_failsafe_savings_bytes) / POWER(1024, 4), 4) AS potential_savings_tb,
-            ROUND(SUM(potential_failsafe_savings_bytes) / POWER(1024, 4) * 23.0, 0) AS est_monthly_savings_usd
+            ROUND(SUM(potential_failsafe_savings_bytes) / POWER(1024, 4) * {STORAGE_RATE}, 0) AS est_monthly_savings_usd
         FROM savings_analysis
         UNION ALL
         SELECT
             'Reduce TIME_TRAVEL retention on high-churn tables',
             COUNT(CASE WHEN potential_tt_savings_bytes > 0 THEN 1 END),
             ROUND(SUM(potential_tt_savings_bytes) / POWER(1024, 4), 4),
-            ROUND(SUM(potential_tt_savings_bytes) / POWER(1024, 4) * 23.0, 0)
+            ROUND(SUM(potential_tt_savings_bytes) / POWER(1024, 4) * {STORAGE_RATE}, 0)
         FROM savings_analysis
     """,
 

@@ -749,13 +749,16 @@ def comp_db_high_churn(entry_actions=None):
 def _render_potential_savings():
     st.markdown("### Potential Storage Savings Summary")
     st.markdown(
-        "Estimated monthly savings from converting high-churn tables to TRANSIENT or reducing "
-        "Time Travel retention. Based on **$23.00/TB/month** standard storage rate.",
+        f"Estimated monthly savings from converting high-churn tables to TRANSIENT or reducing "
+        f"Time Travel retention. Based on **${st.session_state.get('rate_storage', 23.0):.2f}/TB/month** storage rate.",
         unsafe_allow_html=False)
     try:
         session = st.session_state.session
-        df = _cached_query(session, "db_overview_25_savings_actions_query",
-                           ALL_DB_OVERVIEW_QUERIES["db_overview_25_savings_actions_query"])
+        _storage_rate = float(st.session_state.get("rate_storage", 23.0))
+        _savings_sql = ALL_DB_OVERVIEW_QUERIES["db_overview_25_savings_actions_query"].format(
+            STORAGE_RATE=_storage_rate
+        )
+        df = _cached_query(session, f"db_overview_25_savings_actions_query_{_storage_rate}", _savings_sql)
         if df.empty or len(df) == 0:
             st.info("No significant savings opportunities detected.")
             return

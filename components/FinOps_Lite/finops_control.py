@@ -9,17 +9,24 @@ _C3 = '#75C2D8'
 _CA = '#E8A229'
 
 
+def _get_credit_rate():
+    return float(st.session_state.get("rate_credit", 3.0))
+
+
 def _cached_sql(cache_key, sql):
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
+    credit_rate = _get_credit_rate()
+    keyed = f"{cache_key}_{credit_rate}"
+    if keyed in st.session_state:
+        return st.session_state[keyed]
     session = st.session_state.get("session")
     if not session:
         return pd.DataFrame()
     try:
-        df = session.sql(sql).to_pandas()
+        formatted = sql.format(CREDIT_COST=credit_rate)
+        df = session.sql(formatted).to_pandas()
     except Exception:
         df = pd.DataFrame()
-    st.session_state[cache_key] = df
+    st.session_state[keyed] = df
     return df
 
 
@@ -189,7 +196,7 @@ SELECT DATE_TRUNC('month', start_time) AS MONTH,
        ROUND(SUM(credits_used_cloud_services), 2) AS CS_CREDITS,
        ROUND(SUM(credits_used), 2) AS TOTAL_CREDITS,
        COUNT(DISTINCT DATE(start_time)) AS DAYS_IN_MONTH,
-       ROUND(SUM(credits_used) * 3.0, 2) AS ESTIMATED_COST_USD,
+       ROUND(SUM(credits_used) * {CREDIT_COST}, 2) AS ESTIMATED_COST_USD,
        TO_CHAR(DATE_TRUNC('month', start_time), 'Mon YYYY') AS MONTH_LABEL
 FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY
 GROUP BY DATE_TRUNC('month', start_time)

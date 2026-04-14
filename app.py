@@ -232,6 +232,12 @@ if '_charts_completed' not in st.session_state:
     st.session_state._charts_completed = set()
 if '_charts_running' not in st.session_state:
     st.session_state._charts_running = False
+if 'rate_credit' not in st.session_state:
+    st.session_state.rate_credit = 3.0
+if 'rate_storage' not in st.session_state:
+    st.session_state.rate_storage = 23.0
+if 'rate_transfer' not in st.session_state:
+    st.session_state.rate_transfer = 0.0
 
 _core_topics = [t for t in menu_options if t != "Home"]
 
@@ -392,6 +398,33 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
         st.markdown('<div class="run-charts-btn-anchor"></div>', unsafe_allow_html=True)
         _run_clicked = st.button("Run Charts", key="_run_charts_btn", type="primary",
                                  disabled=st.session_state._charts_running)
+
+    st.markdown("---")
+    st.markdown(
+        f'<h4 style="color: {BRAND_PRIMARY}; margin-bottom: 4px;">Cost Rate Configuration</h4>'
+        f'<p style="color: {TEXT_SECONDARY}; font-size: 0.9rem; margin-bottom: 12px;">'
+        f'Set your Snowflake pricing rates to personalise cost estimates across the assessment.</p>',
+        unsafe_allow_html=True
+    )
+    _rc1, _rc2, _rc3 = st.columns(3)
+    with _rc1:
+        st.session_state.rate_credit = st.number_input(
+            "Compute Credit ($/credit)", min_value=0.0, step=0.25,
+            value=float(st.session_state.rate_credit),
+            key="_rate_credit_input", format="%.2f",
+        )
+    with _rc2:
+        st.session_state.rate_storage = st.number_input(
+            "Storage ($/TB/month)", min_value=0.0, step=1.0,
+            value=float(st.session_state.rate_storage),
+            key="_rate_storage_input", format="%.2f",
+        )
+    with _rc3:
+        st.session_state.rate_transfer = st.number_input(
+            "Data Transfer ($/GB)", min_value=0.0, step=0.01,
+            value=float(st.session_state.rate_transfer),
+            key="_rate_transfer_input", format="%.4f",
+        )
 
     _run_status_ph = st.empty()
 
