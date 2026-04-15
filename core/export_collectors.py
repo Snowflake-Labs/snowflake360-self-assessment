@@ -24,6 +24,10 @@ def _safe_df(key: str) -> pd.DataFrame:
     val = st.session_state.get(key)
     if val is not None and isinstance(val, pd.DataFrame) and not val.empty:
         return val
+    prefix = key + "_"
+    for k, v in st.session_state.items():
+        if isinstance(k, str) and k.startswith(prefix) and isinstance(v, pd.DataFrame) and not v.empty:
+            return v
     return pd.DataFrame()
 
 
