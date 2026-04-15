@@ -736,23 +736,46 @@ def _render_wh_eac_heatmap():
     if df.empty:
         st.info("No warehouse EAC forecast data available.")
         return
-    months = [str(i) for i in range(1, 13)]
-    wh_names = df["WAREHOUSE_NAME"].tolist()
-    z_vals = []
-    for _, row in df.iterrows():
-        z_vals.append([float(row.get(f"M{i}", 0) or 0) for i in range(1, 13)])
 
-    text_vals = [[f"${v:,.0f}" for v in row] for row in z_vals]
-    fig = go.Figure(data=go.Heatmap(
-        z=z_vals, x=months, y=wh_names,
-        text=text_vals, texttemplate="%{text}",
-        colorscale=[[0, _C3], [0.5, _CA], [1, _CA]],
-        showscale=False,
-    ))
-    fig.update_layout(
-        height=max(400, len(wh_names) * 28),
-        margin=dict(t=10, b=40, l=250, r=20),
-        xaxis=dict(side="top"),
-        yaxis=dict(autorange="reversed"),
+    month_cols = [f"M{i}" for i in range(1, 13)]
+    avail = [c for c in month_cols if c in df.columns]
+    display_df = df.set_index("WAREHOUSE_NAME")[avail].copy()
+    display_df.columns = [str(i) for i in range(1, len(avail) + 1)]
+    display_df.index.name = "Warehouse"
+
+    from matplotlib.colors import LinearSegmentedColormap
+    cmap = LinearSegmentedColormap.from_list("snow_eac", ["#FFFFFF", _C1, _CA], N=256)
+
+    styler = (
+        display_df.style
+        .background_gradient(cmap=cmap, axis=0)
+        .format("${:,.0f}")
+        .set_properties(**{"text-align": "right", "font-size": "13px", "padding": "4px 10px"})
+        .set_table_styles([
+            {"selector": "th.col_heading", "props": [
+                ("background-color", _C2), ("color", "white"),
+                ("text-align", "center"), ("padding", "6px 10px"),
+                ("font-size", "13px"), ("font-weight", "600"),
+            ]},
+            {"selector": "th.row_heading", "props": [
+                ("text-align", "left"), ("white-space", "nowrap"),
+                ("padding", "4px 12px"), ("font-size", "13px"),
+                ("background-color", "#F8FAFC"), ("font-weight", "500"),
+            ]},
+            {"selector": "th.blank", "props": [
+                ("background-color", _C2),
+            ]},
+            {"selector": "td", "props": [("border", "1px solid #EAEAEA")]},
+            {"selector": "tr:hover td", "props": [("filter", "brightness(0.95)")]},
+            {"selector": "table", "props": [
+                ("border-collapse", "collapse"), ("width", "100%"),
+                ("font-family", "sans-serif"),
+            ]},
+        ])
     )
-    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown(
+        f'<div style="overflow-x: auto; overflow-y: auto; max-height: 640px;">'
+        f'{styler.to_html()}</div>',
+        unsafe_allow_html=True,
+    )

@@ -28,7 +28,7 @@ try:
     from components.Database_Management._db_queries import ALL_DB_OVERVIEW_QUERIES
     from components.Database_Management.db_overview import _query_cache as _DB_QUERY_CACHE
     from core.config.design_tokens import (
-        BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY,
+        BRAND_PRIMARY, BRAND_PRIMARY_DARK, BRAND_SECONDARY, BRAND_ACCENT,
         SURFACE_ALT, SURFACE_BASE,
         TEXT_SECONDARY, TEXT_HEADING,
         TEXT_INVERSE,
@@ -272,16 +272,29 @@ with st.sidebar:
     if _sel_key:
         st.markdown(f"""<style>
             div[data-testid="stSidebar"] .st-key-{_sel_key} button {{
-                background-color: {BRAND_SECONDARY} !important;
+                background-color: {BRAND_ACCENT} !important;
                 color: white !important;
                 font-weight: 600 !important;
-                border: 2px solid {BRAND_SECONDARY} !important;
+                border: 2px solid {BRAND_ACCENT} !important;
+                box-shadow: none !important;
+                outline: none !important;
             }}
             div[data-testid="stSidebar"] .st-key-{_sel_key} button:hover {{
-                background-color: {BRAND_SECONDARY} !important;
+                background-color: {BRAND_ACCENT} !important;
                 color: white !important;
-                border: 2px solid {BRAND_SECONDARY} !important;
+                border: 2px solid {BRAND_ACCENT} !important;
                 opacity: 0.9;
+                box-shadow: none !important;
+                outline: none !important;
+            }}
+            div[data-testid="stSidebar"] .st-key-{_sel_key} button:focus,
+            div[data-testid="stSidebar"] .st-key-{_sel_key} button:focus-visible,
+            div[data-testid="stSidebar"] .st-key-{_sel_key} button:active {{
+                background-color: {BRAND_ACCENT} !important;
+                color: white !important;
+                border: 2px solid {BRAND_ACCENT} !important;
+                box-shadow: none !important;
+                outline: none !important;
             }}
         </style>""", unsafe_allow_html=True)
 

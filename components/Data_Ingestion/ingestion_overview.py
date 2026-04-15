@@ -269,6 +269,34 @@ WHERE COALESCE(total_credits, 0) > 0
 ORDER BY COALESCE(total_credits, 0) DESC
 """
 
+_STREAMING_MIGRATION_SQL = """
+SELECT
+    DATE_TRUNC('month', sfmh.start_time) AS usage_month,
+    sfmh.table_name,
+    sfmh.schema_name,
+    sfmh.database_name,
+    ROUND(SUM(sfmh.credits_used)) AS monthly_credits,
+    ROUND(SUM(sfmh.credits_used) * 3.96) AS estimated_monthly_cost,
+    SUM(sfmh.num_bytes_migrated) AS total_bytes_migrated,
+    SUM(sfmh.num_rows_migrated) AS total_rows_migrated,
+    COUNT(*) AS migration_events
+FROM SNOWFLAKE.ACCOUNT_USAGE.SNOWPIPE_STREAMING_FILE_MIGRATION_HISTORY sfmh
+WHERE sfmh.start_time >= DATEADD(month, -6, CURRENT_DATE())
+GROUP BY DATE_TRUNC('month', sfmh.start_time), sfmh.table_name, sfmh.schema_name, sfmh.database_name
+ORDER BY usage_month DESC, monthly_credits DESC
+"""
+
+_STREAMING_MTD_SQL = """
+SELECT
+    ROUND(SUM(CASE WHEN DATE_TRUNC('month', mdh.usage_date) = DATE_TRUNC('month', CURRENT_DATE()) THEN mdh.credits_billed * 3.96 ELSE 0 END)) AS current_mtd_streaming_cost,
+    ROUND(SUM(CASE WHEN DATE_TRUNC('month', mdh.usage_date) = DATE_TRUNC('month', DATEADD('month', -1, CURRENT_DATE())) AND mdh.usage_date <= DATEADD('month', -1, CURRENT_DATE()) THEN mdh.credits_billed * 3.96 ELSE 0 END)) AS previous_mtd_streaming_cost,
+    ROUND(SUM(CASE WHEN DATE_TRUNC('month', mdh.usage_date) = DATE_TRUNC('month', CURRENT_DATE()) THEN mdh.credits_billed ELSE 0 END)) AS current_mtd_streaming_credits,
+    ROUND(SUM(CASE WHEN DATE_TRUNC('month', mdh.usage_date) = DATE_TRUNC('month', DATEADD('month', -1, CURRENT_DATE())) AND mdh.usage_date <= DATEADD('month', -1, CURRENT_DATE()) THEN mdh.credits_billed ELSE 0 END)) AS previous_mtd_streaming_credits
+FROM SNOWFLAKE.ACCOUNT_USAGE.METERING_DAILY_HISTORY mdh
+WHERE mdh.service_type = 'SNOWPIPE_STREAMING'
+  AND mdh.usage_date >= DATE_TRUNC('month', DATEADD('month', -1, CURRENT_DATE()))
+"""
+
 _ALL_INGESTION_QUERIES = {
     "ingestion_streaming_data": _SNOWPIPE_STREAMING_SQL,
     "ingestion_summary_data": _INGESTION_SUMMARY_SQL,
@@ -277,6 +305,8 @@ _ALL_INGESTION_QUERIES = {
     "ig_pipe_efficiency": _PIPE_EFFICIENCY_SQL,
     "ig_snowpipe_detail": _SNOWPIPE_DETAIL_SQL,
     "ig_pipe_cost_projection": _PIPE_COST_PROJECTION_SQL,
+    "ig_streaming_migration": _STREAMING_MIGRATION_SQL,
+    "ig_streaming_mtd": _STREAMING_MTD_SQL,
 }
 
 
@@ -465,6 +495,8 @@ def comp_ingestion_overview(entry_actions=None):
         with sub_tabs[2]:
             with st.spinner("Loading Snowpipe Streaming..."):
                 _render_snowpipe_streaming()
+                st.divider()
+                _render_streaming_migration_charts()
 
         with sub_tabs[3]:
             with st.spinner("Loading Ingestion Summary Dashboard..."):
@@ -504,3 +536,88 @@ def _render_streaming_service_breakdown():
         st.dataframe(df, use_container_width=True)
     except Exception as e:
         st.error(f"Error loading streaming breakdown: {e}")
+
+
+def _render_streaming_migration_charts():
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("#### Legacy Snowpipe Streaming")
+        ck = "ig_streaming_migration"
+        if ck not in st.session_state:
+            st.session_state[ck] = _run_query(_STREAMING_MIGRATION_SQL)
+        df = st.session_state[ck]
+        if df.empty:
+            st.info("No Snowpipe Streaming file migration data in the last 6 months.")
+        else:
+            for col in ["MONTHLY_CREDITS", "ESTIMATED_MONTHLY_COST"]:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            df["USAGE_MONTH"] = df["USAGE_MONTH"].astype(str).str[:7]
+            months = sorted(df["USAGE_MONTH"].unique().tolist())
+            tables = df["TABLE_NAME"].unique().tolist()[:10]
+            bar_colors = [_C1, _CA, _C2, _C3] + list(CHART_SERIES)
+            fig = go.Figure()
+            for i, tbl in enumerate(tables):
+                subset = df[df["TABLE_NAME"] == tbl]
+                month_map = dict(zip(subset["USAGE_MONTH"], subset["MONTHLY_CREDITS"]))
+                fig.add_trace(go.Bar(
+                    name=tbl,
+                    x=months,
+                    y=[month_map.get(m, 0) for m in months],
+                    marker_color=bar_colors[i % len(bar_colors)],
+                    hovertemplate="<b>%{x}</b><br>%{fullData.name}<br>Credits: %{y:,.0f}<extra></extra>",
+                ))
+            fig.update_layout(
+                barmode="stack",
+                height=380,
+                margin=dict(t=10, b=60, l=60, r=20),
+                xaxis_title="Month",
+                yaxis_title="Credits",
+                legend=dict(orientation="h", y=-0.35, font=dict(size=11)),
+                showlegend=True,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col_right:
+        st.markdown("#### Streaming Trends")
+        ck2 = "ig_streaming_mtd"
+        if ck2 not in st.session_state:
+            st.session_state[ck2] = _run_query(_STREAMING_MTD_SQL)
+        df2 = st.session_state[ck2]
+        if df2.empty:
+            st.info("No streaming trend data available.")
+        else:
+            row = df2.iloc[0]
+            curr_cost = float(row.get("CURRENT_MTD_STREAMING_COST") or 0)
+            prev_cost = float(row.get("PREVIOUS_MTD_STREAMING_COST") or 0)
+            curr_cred = float(row.get("CURRENT_MTD_STREAMING_CREDITS") or 0)
+            prev_cred = float(row.get("PREVIOUS_MTD_STREAMING_CREDITS") or 0)
+            if curr_cost + prev_cost > 0:
+                fig2 = go.Figure(data=[go.Pie(
+                    labels=["Current MTD", "Previous MTD"],
+                    values=[curr_cost, prev_cost],
+                    hole=0.45,
+                    marker=dict(colors=[_CA, _C1]),
+                    textinfo="percent+label",
+                    textposition="inside",
+                    hovertemplate="<b>%{label}</b><br>$%{value:,.0f}<extra></extra>",
+                )])
+                fig2.update_layout(
+                    height=300,
+                    margin=dict(t=10, b=10, l=20, r=20),
+                    showlegend=True,
+                    legend=dict(orientation="h", y=-0.1),
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+                mc1, mc2 = st.columns(2)
+                mc1.metric(
+                    "Current MTD Credits", f"{curr_cred:,.0f}",
+                    delta=f"{curr_cred - prev_cred:+,.0f} vs prev MTD",
+                )
+                mc2.metric(
+                    "Current MTD Cost", f"${curr_cost:,.0f}",
+                    delta=f"${curr_cost - prev_cost:+,.0f} vs prev MTD",
+                )
+            else:
+                st.info("No streaming cost data available for this period.")
