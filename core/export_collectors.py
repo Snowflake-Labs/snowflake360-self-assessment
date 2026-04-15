@@ -2691,17 +2691,53 @@ def export_finops(account_name: str) -> str:
     if not df_eac.empty and "WAREHOUSE_NAME" in df_eac.columns:
         m_cols = [f"M{i}" for i in range(1, 13) if f"M{i}" in df_eac.columns]
         if m_cols:
-            headers = ["Warehouse"] + [str(i) for i in range(1, len(m_cols) + 1)]
-            rows = []
-            for _, row in df_eac.head(30).iterrows():
-                r = [str(row.get("WAREHOUSE_NAME", ""))]
+            data30 = df_eac.head(30)
+            col_vals = {}
+            for mc in m_cols:
+                vals = [float(r.get(mc, 0) or 0) for _, r in data30.iterrows()]
+                col_vals[mc] = (min(vals), max(vals))
+
+            def _eac_cell_color(v, mn, mx):
+                t = (v - mn) / (mx - mn) if mx > mn else 0.0
+                t = max(0.0, min(1.0, t))
+                if t < 0.5:
+                    t2 = t / 0.5
+                    r2 = int(255 + t2 * (41 - 255))
+                    g2 = int(255 + t2 * (181 - 255))
+                    b2 = int(255 + t2 * (232 - 255))
+                else:
+                    t2 = (t - 0.5) / 0.5
+                    r2 = int(41 + t2 * (232 - 41))
+                    g2 = int(181 + t2 * (162 - 181))
+                    b2 = int(232 + t2 * (41 - 232))
+                bg = f"#{r2:02X}{g2:02X}{b2:02X}"
+                fg = "#ffffff" if t > 0.4 else "#333333"
+                return f'style="background:{bg};color:{fg};text-align:right;padding:4px 8px;"'
+
+            hdr_style = 'style="background:#11567F;color:white;padding:5px 8px;text-align:center;"'
+            idx_style = 'style="text-align:left;padding:4px 8px;white-space:nowrap;font-size:12px;"'
+            th_row = "<tr>" + f"<th {hdr_style}>Warehouse</th>" + "".join(
+                f"<th {hdr_style}>{i}</th>" for i in range(1, len(m_cols) + 1)) + "</tr>"
+            body_rows = ""
+            for _, row in data30.iterrows():
+                tds = f"<td {idx_style}>{row.get('WAREHOUSE_NAME','')}</td>"
                 for mc in m_cols:
                     v = float(row.get(mc, 0) or 0)
-                    r.append(f"${v:,.0f}")
-                rows.append(r)
-            vis_html += _full_wrap(
-                '<div class="chart-title">Top 30 Warehouse 12-Month EAC Forecast</div>' +
-                _make_table(headers, rows))
+                    mn, mx = col_vals[mc]
+                    tds += f"<td {_eac_cell_color(v, mn, mx)}>${v:,.0f}</td>"
+                body_rows += f"<tr>{tds}</tr>"
+
+            eac_table = (
+                f'<table style="border-collapse:collapse;width:100%;font-size:12px;">'
+                f"<thead>{th_row}</thead><tbody>{body_rows}</tbody></table>"
+            )
+            vis_html += _subtitle("Top 30 Warehouse 12-Month EAC Forecast")
+            vis_html += (
+                '<p style="font-size:11px;color:#555;margin:0 0 6px 0;">'
+                "Warehouse forecast heatmap. Low projected spend is shaded toward cyan, "
+                "high projected spend toward orange (per-column scaling).</p>"
+            )
+            vis_html += f'<div style="overflow-x:auto;">{eac_table}</div>'
 
     if not df_cq.empty:
         q_col  = _col(df_cq, "QUERY_ID")
