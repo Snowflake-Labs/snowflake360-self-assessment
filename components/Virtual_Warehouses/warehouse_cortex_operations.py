@@ -53,7 +53,7 @@ def call_cortex_llm(session, model_name: str, prompt: str, operation_name: str =
         sql_safe_prompt = prompt.replace("$$", "$$$$").replace("'", "''")
 
         cortex_sql = f"""
-        SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(
+        SELECT SNOWFLAKE.CORTEX.COMPLETE(
             $${model_name}$$,
             $${sql_safe_prompt}$$
         ) AS CORTEX_RESPONSE

@@ -59,6 +59,35 @@ if _import_err:
     st.code(_import_err)
     st.stop()
 
+
+_LLM_FILTER_PREFIXES = (
+    "claude-", "deepseek-", "gemini-", "llama3.", "llama4",
+    "mistral-large", "openai-", "snowflake-llama",
+)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_available_models():
+    try:
+        session = get_active_session()
+        rows = session.sql("SHOW MODELS IN SNOWFLAKE.MODELS").collect()
+        candidates = sorted(
+            row["name"].lower() for row in rows
+            if row["name"].lower().startswith(_LLM_FILTER_PREFIXES)
+        )
+        if not candidates:
+            return []
+        probe_sql = " UNION ALL ".join(
+            f"SELECT '{m}' AS model WHERE SNOWFLAKE.CORTEX.TRY_COMPLETE('{m}', 'hi') IS NOT NULL"
+            for m in candidates
+        )
+        valid_rows = session.sql(probe_sql).collect()
+        valid = sorted(row["MODEL"] for row in valid_rows)
+        return valid if valid else []
+    except Exception:
+        pass
+    return []
+
 st.markdown(global_settings.MAIN_MARKDOWN_BODY, unsafe_allow_html=True)
 st.markdown(global_settings.DEFAULT2_MARKDOWN_BODY, unsafe_allow_html=True)
 
@@ -378,25 +407,19 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
         unsafe_allow_html=True
     )
 
-    AVAILABLE_LLMS = [
-        "claude-3-7-sonnet",
-        "claude-3-5-sonnet",
-        "claude-4-sonnet",
-        "claude-4-opus",
-        "deepseek-r1",
-        "llama3.1-70b",
-        "llama3.1-405b",
-        "llama3.3-70b",
-        "llama4-maverick",
-        "llama4-scout",
-        "mistral-large2",
-        "openai-gpt-4.1",
-        "openai-o4-mini",
-        "snowflake-llama-3.3-70b",
-    ]
+    with st.spinner("Probing available AI models..."):
+        AVAILABLE_LLMS = _fetch_available_models()
+    if not AVAILABLE_LLMS:
+        st.warning(
+            "No models found. An ACCOUNTADMIN must run "
+            "`CALL SNOWFLAKE.MODELS.CORTEX_BASE_MODELS_REFRESH();` to register "
+            "available Cortex models. "
+            "[Documentation](https://docs.snowflake.com/en/user-guide/snowflake-cortex/aisql#control-model-access)"
+        )
+        st.stop()
 
     if "selected_llm" not in st.session_state:
-        st.session_state.selected_llm = "claude-3-7-sonnet"
+        st.session_state.selected_llm = AVAILABLE_LLMS[0] if AVAILABLE_LLMS else "claude-3-7-sonnet"
 
     _llm_col, _test_col, _all_col, _run_col = st.columns([3, 0.6, 1.2, 1.2])
     with _llm_col:
@@ -601,7 +624,7 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
         _test_status.info(f"Testing **{st.session_state.selected_llm}**...")
         try:
             _test_result = st.session_state.session.sql(
-                f"SELECT SNOWFLAKE.CORTEX.AI_COMPLETE($${st.session_state.selected_llm}$$, 'Respond with only: OK')"
+                f"SELECT SNOWFLAKE.CORTEX.COMPLETE($${st.session_state.selected_llm}$$, 'Respond with only: OK')"
             ).collect()[0][0]
             _test_status.success(f"**{st.session_state.selected_llm}** is available and responding.")
         except Exception as _llm_err:

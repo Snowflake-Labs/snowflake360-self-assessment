@@ -15,7 +15,7 @@
 """
 Database Management Analyzer - AI-powered analysis using Snowflake Cortex.
 Gathers storage and database metadata from ACCOUNT_USAGE and generates
-recommendations via SNOWFLAKE.CORTEX.AI_COMPLETE().
+recommendations via SNOWFLAKE.CORTEX.COMPLETE().
 """
 
 import streamlit as st
@@ -27,7 +27,7 @@ def _call_cortex(session, model_name, prompt):
     try:
         safe_prompt = prompt.replace("$$", "$$$$").replace("'", "''")
         result = session.sql(f"""
-            SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(
                 $${model_name}$$,
                 $${safe_prompt}$$
             ) AS RESPONSE

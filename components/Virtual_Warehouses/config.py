@@ -39,11 +39,11 @@ SAMPLE_JSON_OUTPUT_DF = pd.DataFrame(columns=SAMPLE_OUTPUT_COLUMNS) # Empty DF w
 # }])
 
 
-# Cortex Model Configuration - Only Claude models supported
+# Cortex Model Configuration - dynamically populated from app.py at runtime
+# These are used as fallback values only if session_state is not available
 AVAILABLE_CORTEX_MODELS = ["claude-3-7-sonnet", "claude-4-sonnet"]
 DEFAULT_CORTEX_MODEL = "claude-3-7-sonnet"
 
-# Cortex model token limits (verified from Snowflake docs)
 CORTEX_MODEL_TOKEN_LIMITS = {
     "claude-3-7-sonnet": 200000,
     "claude-4-sonnet": 200000,

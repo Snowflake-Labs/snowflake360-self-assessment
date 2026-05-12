@@ -21,7 +21,7 @@ def _call_cortex(session, model_name, prompt):
     try:
         safe_prompt = prompt.replace("$$", "$$$$").replace("'", "''")
         result = session.sql(f"""
-            SELECT SNOWFLAKE.CORTEX.AI_COMPLETE(
+            SELECT SNOWFLAKE.CORTEX.COMPLETE(
                 $${model_name}$$,
                 $${safe_prompt}$$
             ) AS RESPONSE
