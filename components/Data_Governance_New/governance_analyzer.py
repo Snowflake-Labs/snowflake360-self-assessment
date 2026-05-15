@@ -257,7 +257,7 @@ def comp_governance_analyzer(entry_actions=None):
         st.warning("No active Snowflake session found.")
         return
 
-    model = st.session_state.get("selected_llm", "claude-3-7-sonnet")
+    model = st.session_state.get("selected_llm", "claude-sonnet-4-6")
 
     tab_summary, tab_individual = st.tabs(["Summary Analysis", "Individual Governance Analysis"])
 
@@ -307,7 +307,7 @@ def comp_governance_analyzer(entry_actions=None):
         selected = st.selectbox("Governance Entity / Component", GOVERNANCE_ENTITIES, key="gov_entity_select")
         entity_key = selected.split(":")[0].strip()
 
-        if st.button("Analyze", key="gov_indiv_btn", type="secondary"):
+        if st.button("Analyze", key="gov_indiv_btn", type="primary"):
             indiv_key = f"gov_indiv_{entity_key}"
             _prog = st.progress(0)
             _stat = st.empty()

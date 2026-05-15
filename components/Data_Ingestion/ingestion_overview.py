@@ -402,6 +402,9 @@ def _render_snowpipe_streaming():
     with st.expander("Snowpipe Streaming Service Breakdown", expanded=True):
         _render_streaming_service_breakdown()
 
+    with st.expander("Streaming Channel Health (Table-Level)", expanded=True):
+        _render_streaming_channel_health()
+
 
 def _render_ingestion_summary():
     ck = "ingestion_summary_data"
@@ -550,6 +553,63 @@ def _render_streaming_service_breakdown():
         st.dataframe(df, use_container_width=True)
     except Exception as e:
         st.error(f"Error loading streaming breakdown: {e}")
+
+
+def _render_streaming_channel_health():
+    import plotly.graph_objects as go
+    _C1 = '#29B5E8'
+    _C2 = '#11567F'
+    _CA = '#E8A229'
+    session = st.session_state.get("session")
+    if not session:
+        return
+    try:
+        df = session.sql("""
+            SELECT
+                TABLE_DATABASE_NAME || '.' || TABLE_SCHEMA_NAME || '.' || TABLE_NAME AS TABLE_FQN,
+                COUNT(DISTINCT CHANNEL_ID) AS ACTIVE_CHANNELS,
+                SUM(ROWS_INSERTED) AS TOTAL_ROWS_INSERTED,
+                SUM(ROW_ERROR_COUNT) AS TOTAL_ERRORS,
+                ROUND(AVG(SNOWFLAKE_PROCESSING_LATENCY_MS), 1) AS AVG_LATENCY_MS,
+                ROUND(MAX(SNOWFLAKE_PROCESSING_LATENCY_MS), 1) AS MAX_LATENCY_MS,
+                ROUND(100.0 * SUM(ROW_ERROR_COUNT) / NULLIF(SUM(ROWS_PARSED), 0), 4) AS ERROR_RATE_PCT
+            FROM SNOWFLAKE.ACCOUNT_USAGE.SNOWPIPE_STREAMING_CHANNEL_HISTORY
+            WHERE CREATED_ON >= DATEADD('day', -30, CURRENT_DATE())
+            GROUP BY 1
+            ORDER BY TOTAL_ROWS_INSERTED DESC
+            LIMIT 20
+        """).to_pandas()
+    except Exception:
+        st.info("No streaming channel data available (`SNOWPIPE_STREAMING_CHANNEL_HISTORY`).")
+        return
+    if df.empty:
+        st.info("No streaming channel activity in the last 30 days.")
+        return
+    total_channels = int(df["ACTIVE_CHANNELS"].sum())
+    total_rows = int(df["TOTAL_ROWS_INSERTED"].sum())
+    total_errors = int(df["TOTAL_ERRORS"].sum())
+    avg_latency = round(float(df["AVG_LATENCY_MS"].mean()), 1)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Active Channels", f"{total_channels:,}")
+    c2.metric("Rows Inserted (30d)", f"{total_rows:,}")
+    c3.metric("Row Errors (30d)", f"{total_errors:,}")
+    c4.metric("Avg Latency (ms)", f"{avg_latency:,.1f}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("##### Rows Inserted by Table (Top 20)")
+        fig = go.Figure(data=[go.Bar(
+            y=df["TABLE_FQN"].tolist()[::-1], x=df["TOTAL_ROWS_INSERTED"].tolist()[::-1],
+            orientation="h", marker_color=_C1)])
+        fig.update_layout(height=420, margin=dict(t=10, b=40, l=280, r=20), showlegend=False, xaxis_title="Rows")
+        st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        st.markdown("##### Avg Latency by Table (ms)")
+        fig = go.Figure(data=[go.Bar(
+            y=df["TABLE_FQN"].tolist()[::-1], x=df["AVG_LATENCY_MS"].tolist()[::-1],
+            orientation="h", marker_color=[_CA if v > 500 else _C2 for v in df["AVG_LATENCY_MS"].tolist()[::-1]])])
+        fig.update_layout(height=420, margin=dict(t=10, b=40, l=280, r=20), showlegend=False, xaxis_title="Latency (ms)")
+        st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(df, use_container_width=True)
 
 
 def _render_streaming_migration_charts():

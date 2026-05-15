@@ -419,7 +419,7 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
         st.stop()
 
     if "selected_llm" not in st.session_state:
-        st.session_state.selected_llm = AVAILABLE_LLMS[0] if AVAILABLE_LLMS else "claude-3-7-sonnet"
+        st.session_state.selected_llm = "claude-sonnet-4-6" if "claude-sonnet-4-6" in AVAILABLE_LLMS else AVAILABLE_LLMS[0]
 
     _llm_col, _test_col, _all_col, _run_col = st.columns([3, 0.6, 1.2, 1.2])
     with _llm_col:
@@ -542,6 +542,8 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
                 )
             else:
                 hdr = (
+                    f'<p style="color:{_CB};font-size:0.85rem;margin:0 0 8px 0;font-style:italic;">'
+                    f'Please wait while the loading of your selected charts completes.</p>'
                     f'<p style="color:{_CT};font-weight:600;font-size:0.9rem;margin:0 0 4px 0;">'
                     f'Loading charts&hellip;&nbsp;&nbsp;{done_total}&nbsp;/&nbsp;{q_total} queries complete</p>'
                 )
@@ -673,6 +675,7 @@ else:
             _is_first_visit = not st.session_state.get(f"_topic_ready_{_nav_key(selected_menu)}", False)
             if _is_first_visit:
                 st.session_state[f"_topic_ready_{_nav_key(selected_menu)}"] = True
+                st.info("Loading topic data — this may take a moment on first visit.", icon="⏳")
             _cycle = st.session_state.topic_nav_count % 20
             for _ in range(_cycle):
                 st.empty()
@@ -686,8 +689,7 @@ else:
                             method_name = component_fn.split('.')[-1]
                             handler = get_analysis_comp_handler()
                             if hasattr(handler, method_name):
-                                with st.spinner(f"Loading {tab_name}..."):
-                                    getattr(handler, method_name)()
+                                getattr(handler, method_name)()
                             else:
                                 st.info(f"Component `{method_name}` not yet implemented.")
                         else:
@@ -698,8 +700,7 @@ else:
                             f'Error loading {tab_name}: {str(e)}</div>',
                             unsafe_allow_html=True
                         )
-            if _is_first_visit:
+            if selected_menu not in st.session_state._charts_completed:
                 st.session_state._charts_completed.add(selected_menu)
-                st.experimental_rerun()
 
 st.markdown(global_settings.APP_VERSION_FOOTER, unsafe_allow_html=True)

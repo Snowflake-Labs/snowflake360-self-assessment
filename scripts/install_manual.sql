@@ -62,6 +62,10 @@ GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE
 GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER
     TO ROLE IDENTIFIER($v_role);
 
+-- 3b-ii. Register Cortex models (populates SNOWFLAKE.MODELS for dynamic LLM dropdown)
+--        This can take 1-2 minutes. Safe to re-run at any time.
+CALL SNOWFLAKE.MODELS.CORTEX_BASE_MODELS_REFRESH();
+
 -- 3c. Warehouse, database, schema access
 GRANT USAGE ON WAREHOUSE IDENTIFIER($v_warehouse)
     TO ROLE IDENTIFIER($v_role);

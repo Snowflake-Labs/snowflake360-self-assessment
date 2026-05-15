@@ -378,6 +378,8 @@ def comp_finops_control(entry_actions=None):
             df = _cached_sql("fc_custom_budgets", _SQL_CUSTOM_BUDGETS)
             st.dataframe(df, use_container_width=True)
 
+        _render_cortex_ai_control()
+
     except Exception as e:
         st.markdown(
             f'<div style="background-color: #FDEDEC; border-left: 6px solid {_CA}; padding: 10px;">'
@@ -688,3 +690,109 @@ def _render_budget_inventory():
     with c3:
         st.metric("Custom Budgets", custom)
     st.dataframe(df, use_container_width=True)
+
+
+_SQL_AI_WOW = """
+WITH weekly AS (
+    SELECT DATE_TRUNC('week', START_TIME)::DATE AS WEEK_START,
+           ROUND(SUM(CREDITS), 4) AS WEEKLY_CREDITS
+    FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+    WHERE START_TIME >= DATEADD('week', -12, CURRENT_DATE())
+    GROUP BY 1
+)
+SELECT WEEK_START, WEEKLY_CREDITS,
+    ROUND(100.0 * (WEEKLY_CREDITS - LAG(WEEKLY_CREDITS) OVER (ORDER BY WEEK_START))
+        / NULLIF(LAG(WEEKLY_CREDITS) OVER (ORDER BY WEEK_START), 0), 2) AS WOW_CHANGE_PCT
+FROM weekly ORDER BY WEEK_START
+"""
+
+_SQL_AI_BY_WH = """
+SELECT COALESCE(w.WAREHOUSE_NAME, '(unknown)') AS WAREHOUSE_NAME,
+       ROUND(SUM(h.CREDITS), 4) AS AI_CREDITS
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY h
+LEFT JOIN SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY w ON h.WAREHOUSE_ID = w.WAREHOUSE_ID
+WHERE h.START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY 1 ORDER BY AI_CREDITS DESC
+"""
+
+_SQL_AI_ACCESS = """
+SELECT GRANTEE_NAME, NAME AS CORTEX_DB_ROLE, CREATED_ON AS GRANTED_ON
+FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
+WHERE DELETED_ON IS NULL AND PRIVILEGE = 'USAGE'
+  AND GRANTED_ON IN ('DATABASE_ROLE', 'ROLE')
+  AND NAME IN ('CORTEX_USER', 'AI_FUNCTIONS_USER', 'CORTEX_EMBED_USER', 'COPILOT_USER')
+  AND TABLE_CATALOG = 'SNOWFLAKE'
+ORDER BY GRANTEE_NAME
+"""
+
+_SQL_AI_PARETO = """
+WITH per_user AS (
+    SELECT USER_ID, SUM(CREDITS) AS total_credits
+    FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+    WHERE START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+    GROUP BY 1
+)
+SELECT u.NAME AS USER_NAME, ROUND(pu.total_credits, 4) AS TOTAL_CREDITS_30D,
+    ROUND(SUM(pu.total_credits) OVER (ORDER BY pu.total_credits DESC) * 100.0
+        / NULLIF(SUM(pu.total_credits) OVER (), 0), 2) AS CUMULATIVE_PCT
+FROM per_user pu
+LEFT JOIN SNOWFLAKE.ACCOUNT_USAGE.USERS u ON pu.USER_ID = u.USER_ID
+ORDER BY TOTAL_CREDITS_30D DESC LIMIT 20
+"""
+
+
+def _render_cortex_ai_control():
+    with st.expander("Cortex AI \u2014 Control", expanded=True):
+        st.caption("AI cost control: week-over-week trend, warehouse attribution, access grants, spend concentration.")
+        session = st.session_state.get("session")
+        if not session:
+            return
+        try:
+            df_wow = session.sql(_SQL_AI_WOW).to_pandas()
+        except Exception:
+            st.info("No Cortex AI usage data available for control analysis.")
+            return
+        if df_wow.empty:
+            st.info("No Cortex AI usage detected.")
+            return
+        st.markdown("##### AI Week-over-Week Credit Trend")
+        fig = go.Figure(data=[go.Bar(x=df_wow["WEEK_START"], y=df_wow["WEEKLY_CREDITS"],
+            marker_color=_C1, text=[f"{v:,.4f}" for v in df_wow["WEEKLY_CREDITS"]], textposition="outside")])
+        fig.update_layout(height=350, margin=dict(t=10, b=40, l=50, r=20), yaxis_title="Credits")
+        st.plotly_chart(fig, use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            try:
+                df_wh = session.sql(_SQL_AI_BY_WH).to_pandas()
+                if not df_wh.empty:
+                    st.markdown("##### AI Credits by Warehouse (30d)")
+                    top = df_wh.head(15)
+                    fig = go.Figure(data=[go.Bar(y=top["WAREHOUSE_NAME"].tolist()[::-1],
+                        x=top["AI_CREDITS"].tolist()[::-1], orientation="h", marker_color=_C2)])
+                    fig.update_layout(height=400, margin=dict(t=10, b=40, l=200, r=20), showlegend=False, xaxis_title="Credits")
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                pass
+        with col2:
+            try:
+                df_pareto = session.sql(_SQL_AI_PARETO).to_pandas()
+                if not df_pareto.empty:
+                    st.markdown("##### AI Spend Concentration (30d)")
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(x=df_pareto["USER_NAME"], y=df_pareto["TOTAL_CREDITS_30D"],
+                        name="Credits", marker_color=_C1))
+                    fig.add_trace(go.Scatter(x=df_pareto["USER_NAME"], y=df_pareto["CUMULATIVE_PCT"],
+                        mode="lines+markers", name="Cumulative %", yaxis="y2", line=dict(color=_CA, width=2)))
+                    fig.update_layout(height=400, margin=dict(t=10, b=80, l=50, r=50),
+                        yaxis=dict(title="Credits"), yaxis2=dict(title="Cumulative %", overlaying="y", side="right", range=[0, 105]),
+                        legend=dict(orientation="h", y=1.05, x=0), xaxis=dict(tickangle=-45))
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                pass
+        try:
+            df_access = session.sql(_SQL_AI_ACCESS).to_pandas()
+            if not df_access.empty:
+                st.markdown("##### Cortex Access Grants")
+                st.dataframe(df_access, use_container_width=True)
+        except Exception:
+            pass

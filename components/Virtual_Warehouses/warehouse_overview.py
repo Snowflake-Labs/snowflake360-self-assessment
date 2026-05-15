@@ -559,6 +559,22 @@ def _render_overview():
                           yaxis_title="Number of Warehouses")
         st.plotly_chart(fig, use_container_width=True)
 
+    type_series = fleet_df["WAREHOUSE_TYPE"].str.upper().value_counts() if "WAREHOUSE_TYPE" in fleet_df.columns else pd.Series(dtype=int)
+    interactive_count = int(type_series.get("INTERACTIVE", 0))
+    adaptive_count = int(type_series.get("ADAPTIVE", 0))
+    snowpark_count = int(type_series.get("SNOWPARK-OPTIMIZED", 0))
+    if interactive_count + adaptive_count + snowpark_count > 0:
+        type_color = "#023E8A"
+        type_cols = st.columns(3)
+        for idx, (label, cnt) in enumerate([("INTERACTIVE", interactive_count), ("ADAPTIVE", adaptive_count), ("SNOWPARK-OPTIMIZED", snowpark_count)]):
+            type_cols[idx].markdown(
+                f'<div style="text-align:center;">'
+                f'<div style="color:{type_color};font-size:13px;">{label}</div>'
+                f'<div style="color:{type_color};font-size:28px;font-weight:bold;">{cnt}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
     with st.expander("Warehouse Configuration Details", expanded=True):
         config_df = st.session_state.get("wh_config_details", pd.DataFrame())
         if config_df.empty:

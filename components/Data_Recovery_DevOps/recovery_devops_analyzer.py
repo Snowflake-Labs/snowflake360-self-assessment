@@ -204,7 +204,7 @@ def comp_recovery_devops_analyzer(entry_actions=None):
         st.warning("No active Snowflake session found.")
         return
 
-    model = st.session_state.get("selected_llm", "claude-3-7-sonnet")
+    model = st.session_state.get("selected_llm", "claude-sonnet-4-6")
 
     tab_summary, tab_individual = st.tabs(["Summary Analysis", "Individual Task Analysis"])
 
@@ -272,7 +272,7 @@ def comp_recovery_devops_analyzer(entry_actions=None):
 
         selected = st.selectbox("Task / Dynamic Table", entities, key="rd_entity_select")
 
-        if st.button("Analyze", key="rd_indiv_btn", type="secondary"):
+        if st.button("Analyze", key="rd_indiv_btn", type="primary"):
             indiv_key = f"rd_indiv_{selected}"
             _prog = st.progress(0)
             _stat = st.empty()

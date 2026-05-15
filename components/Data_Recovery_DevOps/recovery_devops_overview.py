@@ -15,12 +15,12 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .dcm_adoption import comp_dcm_adoption, _ALL_DCM_QUERIES
 from .git_integration import comp_git_integration, _ALL_GIT_QUERIES
 from .cicd_automation import comp_cicd_automation, _ALL_CICD_QUERIES
 from .declarative_pipeline import comp_declarative_pipeline, _ALL_ORCH_QUERIES
+from .dbt_projects import comp_dbt_projects
 
 _C1 = '#29B5E8'
 _C2 = '#11567F'
@@ -32,30 +32,53 @@ WITH metrics AS (
     SELECT
         SUM(CASE WHEN query_text ILIKE '%CREATE OR ALTER%' THEN 1 ELSE 0 END) AS declarative_ddl,
         SUM(CASE WHEN query_text ILIKE '%EXECUTE IMMEDIATE FROM%' THEN 1 ELSE 0 END) AS git_deploys,
+        SUM(CASE WHEN query_text ILIKE '%snow dbt%' OR query_text ILIKE '%EXECUTE DBT PROJECT%' THEN 1 ELSE 0 END) AS dcm_deploys,
         COUNT(*) AS total_ddl
     FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
     WHERE start_time >= DATEADD('day', -30, CURRENT_TIMESTAMP())
       AND query_type IN ('CREATE_TABLE','ALTER_TABLE','EXECUTE_IMMEDIATE','CREATE_VIEW')
       AND execution_status = 'SUCCESS'
+),
+dbt_stats AS (
+    SELECT COUNT(*) AS dbt_executions
+    FROM SNOWFLAKE.ACCOUNT_USAGE.DBT_PROJECT_EXECUTION_HISTORY
+    WHERE QUERY_START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+),
+dt_stats AS (
+    SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END AS has_dynamic_tables
+    FROM SNOWFLAKE.ACCOUNT_USAGE.DYNAMIC_TABLE_REFRESH_HISTORY
+    WHERE DATA_TIMESTAMP >= DATEADD('day', -30, CURRENT_TIMESTAMP())
 )
 SELECT
-    declarative_ddl,
-    git_deploys,
-    total_ddl,
+    m.declarative_ddl,
+    m.git_deploys,
+    m.dcm_deploys,
+    m.total_ddl,
+    d.dbt_executions,
+    dt.has_dynamic_tables,
+    (CASE WHEN m.declarative_ddl > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN m.git_deploys > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN m.dcm_deploys > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN d.dbt_executions > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN dt.has_dynamic_tables > 0 THEN 1 ELSE 0 END)
+      + (CASE WHEN m.declarative_ddl * 100.0 / NULLIF(m.total_ddl, 0) > 50 THEN 1 ELSE 0 END)
+    AS maturity_points,
     CASE
-        WHEN declarative_ddl * 100.0 / NULLIF(total_ddl, 0) > 50 AND git_deploys > 0 THEN 'ADVANCED'
-        WHEN declarative_ddl * 100.0 / NULLIF(total_ddl, 0) > 20 OR git_deploys > 0 THEN 'INTERMEDIATE'
-        WHEN total_ddl > 0 THEN 'BASIC'
+        WHEN m.declarative_ddl * 100.0 / NULLIF(m.total_ddl, 0) > 50 AND m.git_deploys > 0 THEN 'ADVANCED'
+        WHEN m.declarative_ddl * 100.0 / NULLIF(m.total_ddl, 0) > 20 OR m.git_deploys > 0 THEN 'INTERMEDIATE'
+        WHEN m.total_ddl > 0 THEN 'BASIC'
         ELSE 'NO_DATA'
     END AS devops_maturity_level,
     CASE
-        WHEN declarative_ddl * 100.0 / NULLIF(total_ddl, 0) < 20
+        WHEN m.declarative_ddl * 100.0 / NULLIF(m.total_ddl, 0) < 20
         THEN 'Adopt CREATE OR ALTER for declarative, idempotent deployments'
-        WHEN git_deploys = 0
+        WHEN m.git_deploys = 0
         THEN 'Consider Git integration for version-controlled deployments'
+        WHEN d.dbt_executions = 0
+        THEN 'Consider deploying dbt projects to Snowflake for managed transformations'
         ELSE 'DevOps practices look mature'
     END AS primary_recommendation
-FROM metrics
+FROM metrics m, dbt_stats d, dt_stats dt
 """
 
 _SQL_SUMMARY_METRICS = """
@@ -189,11 +212,12 @@ def comp_recovery_devops_overview(entry_actions=None):
             progress_ph.empty()
             status_ph.empty()
 
-        tab_dcm, tab_git, tab_cicd, tab_orch, tab_summary = st.tabs([
+        tab_dcm, tab_git, tab_cicd, tab_orch, tab_dbt, tab_summary = st.tabs([
             "Database Change Management (DCM) Adoption",
             "Git Integration Usage",
             "CI/CD Tool Automation",
             "Orchestration Patterns",
+            "dbt Projects",
             "DevOps Maturity Summary"
         ])
 
@@ -208,6 +232,9 @@ def comp_recovery_devops_overview(entry_actions=None):
 
         with tab_orch:
             comp_declarative_pipeline()
+
+        with tab_dbt:
+            comp_dbt_projects()
 
         with tab_summary:
             _render_devops_maturity_summary()
@@ -225,79 +252,58 @@ def _render_devops_maturity_summary():
         st.info("No maturity score data available.")
         return
 
-    score_df.columns = ['DECLARATIVE_DDL', 'GIT_DEPLOYS', 'TOTAL_DDL', 'DEVOPS_MATURITY_LEVEL', 'PRIMARY_RECOMMENDATION']
-
-    decl = int(score_df.iloc[0]['DECLARATIVE_DDL']) if score_df.iloc[0]['DECLARATIVE_DDL'] else 0
-    git_dep = int(score_df.iloc[0]['GIT_DEPLOYS']) if score_df.iloc[0]['GIT_DEPLOYS'] else 0
-    total_ddl = int(score_df.iloc[0]['TOTAL_DDL']) if score_df.iloc[0]['TOTAL_DDL'] else 0
-    level = str(score_df.iloc[0]['DEVOPS_MATURITY_LEVEL'])
-    recommendation = str(score_df.iloc[0]['PRIMARY_RECOMMENDATION'])
+    row = score_df.iloc[0]
+    decl = int(row.iloc[0] or 0)
+    git_dep = int(row.iloc[1] or 0)
+    dcm_dep = int(row.iloc[2] or 0)
+    total_ddl = int(row.iloc[3] or 0)
+    dbt_exec = int(row.iloc[4] or 0)
+    has_dt = int(row.iloc[5] or 0)
+    maturity_pts = int(row.iloc[6] or 0)
+    level = str(row.iloc[7])
+    recommendation = str(row.iloc[8])
 
     level_map = {'NO_DATA': 0, 'BASIC': 1, 'INTERMEDIATE': 2, 'ADVANCED': 3}
     score_val = level_map.get(level, 0)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Maturity Level", level)
-    c2.metric("Declarative DDL", f"{decl:,}")
-    c3.metric("Git Deployments", f"{git_dep:,}")
-    c4.metric("Total Successful DDL", f"{total_ddl:,}")
+    c2.metric("Maturity Points", f"{maturity_pts} / 6")
+    c3.metric("Total Successful DDL", f"{total_ddl:,}")
+    c4.metric("Declarative DDL", f"{decl:,}")
 
-    st.markdown("### Primary Recommendation")
-    st.markdown(
-        f'<div style="background-color:#e8f4f8;border-left:6px solid {_C1};padding:12px;border-radius:4px;">'
-        f'{recommendation}</div>',
-        unsafe_allow_html=True)
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Git Deployments", f"{git_dep:,}")
+    c6.metric("dbt Executions", f"{dbt_exec:,}")
+    c7.metric("Dynamic Tables", "Yes" if has_dt else "No")
+    c8.metric("DCM Deploys", f"{dcm_dep:,}")
 
-    st.markdown("")
+    st.markdown("#### Primary Recommendation")
+    st.info(recommendation)
 
-    st.markdown(
-        f'<div style="text-align:center;color:{_C1};font-size:18px;font-weight:600;">DevOps Maturity Score</div>',
-        unsafe_allow_html=True)
-
-    theta_vals = np.linspace(0, 180, 100)
-    r_vals = [1] * 100
-    x_bg = [r * np.cos(np.radians(t)) for r, t in zip(r_vals, theta_vals)]
-    y_bg = [r * np.sin(np.radians(t)) for r, t in zip(r_vals, theta_vals)]
-
-    sections = [
-        (0, 45, _C3, 'No Data'),
-        (45, 90, _CA, 'Basic'),
-        (90, 135, _C1, 'Intermediate'),
-        (135, 180, _C2, 'Advanced'),
-    ]
-
-    fig = go.Figure()
-    for start_a, end_a, color, label in sections:
-        t = np.linspace(start_a, end_a, 30)
-        xs = [0] + [0.95 * np.cos(np.radians(a)) for a in t] + [0]
-        ys = [0] + [0.95 * np.sin(np.radians(a)) for a in t] + [0]
-        fig.add_trace(go.Scatter(x=xs, y=ys, fill='toself', fillcolor=color,
-                                 line=dict(color='white', width=1),
-                                 hoverinfo='text', text=label, showlegend=False))
-        mid_a = (start_a + end_a) / 2
-        lx = 1.12 * np.cos(np.radians(mid_a))
-        ly = 1.12 * np.sin(np.radians(mid_a))
-        fig.add_annotation(x=lx, y=ly, text=label, showarrow=False,
-                           font=dict(size=11, color='#333'))
-
-    needle_angle = 45 * score_val + 22.5
-    nx = 0.75 * np.cos(np.radians(needle_angle))
-    ny = 0.75 * np.sin(np.radians(needle_angle))
-    fig.add_trace(go.Scatter(x=[0, nx], y=[0, ny], mode='lines',
-                             line=dict(color=_CA, width=4), showlegend=False))
-    fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers',
-                             marker=dict(size=10, color=_CA), showlegend=False))
-
-    fig.add_annotation(x=0, y=0.35, text=f"<b>{score_val} / 3</b>",
-                       showarrow=False, font=dict(size=36, color='#333'))
-
-    fig.update_layout(
-        height=350, xaxis=dict(visible=False, range=[-1.3, 1.3]),
-        yaxis=dict(visible=False, range=[-0.2, 1.3], scaleanchor='x'),
-        margin=dict(t=20, b=20, l=20, r=20), plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)'
+    maturity_fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=score_val,
+        number={"suffix": " / 3"},
+        gauge={
+            "axis": {"range": [0, 3], "tickmode": "array", "tickvals": [0, 1, 2, 3],
+                     "ticktext": ["No Data", "Basic", "Intermediate", "Advanced"]},
+            "bar": {"color": _C2},
+            "steps": [
+                {"range": [0, 1], "color": "#F4FAFD"},
+                {"range": [1, 2], "color": _C3},
+                {"range": [2, 3], "color": _C1},
+            ],
+            "threshold": {"line": {"color": _CA, "width": 4}, "thickness": 0.75, "value": score_val},
+        },
+    ))
+    maturity_fig.update_layout(
+        height=360, margin=dict(t=120, b=20, l=30, r=30),
+        annotations=[dict(text="DevOps Maturity Score", x=0.5, y=1.22,
+                          xref="paper", yref="paper", showarrow=False,
+                          font=dict(size=17, color=_C2))],
     )
-    st.plotly_chart(fig, use_container_width=True, key="maturity_gauge")
+    st.plotly_chart(maturity_fig, use_container_width=True, key="maturity_gauge")
 
     metrics_df = _cached_sql("rd_summary_metrics", _SQL_SUMMARY_METRICS)
     if not metrics_df.empty:

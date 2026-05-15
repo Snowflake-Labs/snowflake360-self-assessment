@@ -328,6 +328,8 @@ def comp_finops_optimization(entry_actions=None):
         with st.expander("Complex SQL Compilation Overhead (>5s compile time, 30d)", expanded=True):
             _render_complex_queries()
 
+        _render_cortex_ai_optimization()
+
     except Exception as e:
         st.markdown(
             f'<div style="background-color: #FDEDEC; border-left: 6px solid {_CA}; padding: 10px;">'
@@ -420,6 +422,114 @@ def _render_short_queries():
                            xaxis_title="EXECUTION_COUNT")
         st.plotly_chart(fig2, use_container_width=True)
     st.dataframe(df, use_container_width=True)
+
+
+_SQL_AI_TOKEN_EFFICIENCY = """
+SELECT
+    MODEL_NAME, FUNCTION_NAME,
+    COUNT(DISTINCT QUERY_ID) AS QUERY_COUNT,
+    ROUND(SUM(CREDITS), 6) AS TOTAL_CREDITS,
+    ROUND(AVG(CREDITS), 6) AS AVG_CREDITS_PER_QUERY,
+    ROUND(MAX(CREDITS), 6) AS MAX_CREDITS_SINGLE_QUERY,
+    CASE WHEN AVG(CREDITS) > 0.1 THEN 'High'
+         WHEN AVG(CREDITS) > 0.01 THEN 'Moderate'
+         ELSE 'Efficient' END AS EFFICIENCY_STATUS
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+WHERE START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY 1, 2
+ORDER BY TOTAL_CREDITS DESC
+"""
+
+_SQL_AI_TOP_QUERIES = """
+SELECT
+    h.QUERY_ID, u.NAME AS USER_NAME, h.FUNCTION_NAME, h.MODEL_NAME,
+    ROUND(SUM(h.CREDITS), 6) AS TOKEN_CREDITS, MIN(h.START_TIME) AS FIRST_SEEN
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY h
+LEFT JOIN SNOWFLAKE.ACCOUNT_USAGE.USERS u ON h.USER_ID = u.USER_ID
+WHERE h.START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY h.QUERY_ID, u.NAME, h.FUNCTION_NAME, h.MODEL_NAME
+ORDER BY TOKEN_CREDITS DESC
+LIMIT 25
+"""
+
+_SQL_AI_TAG_COVERAGE = """
+SELECT
+    u.NAME AS USER_NAME,
+    COUNT(*) AS TOTAL_AI_QUERIES,
+    SUM(CASE WHEN h.QUERY_TAG IS NOT NULL AND TRIM(h.QUERY_TAG) <> '' THEN 1 ELSE 0 END) AS TAGGED_QUERIES,
+    ROUND(100.0 * SUM(CASE WHEN h.QUERY_TAG IS NOT NULL AND TRIM(h.QUERY_TAG) <> '' THEN 1 ELSE 0 END)
+        / NULLIF(COUNT(*), 0), 2) AS TAG_COVERAGE_PCT
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY h
+LEFT JOIN SNOWFLAKE.ACCOUNT_USAGE.USERS u ON h.USER_ID = u.USER_ID
+WHERE h.START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY 1
+HAVING COUNT(*) >= 5
+ORDER BY TOTAL_AI_QUERIES DESC
+"""
+
+_SQL_AI_IDLE_GRANTEES = """
+WITH cortex_grants AS (
+    SELECT GRANTEE_NAME AS grantee_role, NAME AS cortex_db_role, CREATED_ON
+    FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
+    WHERE DELETED_ON IS NULL AND PRIVILEGE = 'USAGE'
+      AND GRANTED_ON IN ('DATABASE_ROLE', 'ROLE')
+      AND NAME IN ('CORTEX_USER', 'AI_FUNCTIONS_USER', 'CORTEX_EMBED_USER', 'COPILOT_USER')
+      AND TABLE_CATALOG = 'SNOWFLAKE'
+),
+usage AS (
+    SELECT DISTINCT ROLE_NAMES[0]::VARCHAR AS role_name
+    FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+    WHERE START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+)
+SELECT cg.grantee_role, cg.cortex_db_role, cg.CREATED_ON,
+    CASE WHEN u.role_name IS NOT NULL THEN 'ACTIVE' ELSE 'IDLE_30D' END AS STATUS
+FROM cortex_grants cg
+LEFT JOIN usage u ON u.role_name = cg.grantee_role
+ORDER BY STATUS, grantee_role
+"""
+
+
+def _render_cortex_ai_optimization():
+    with st.expander("Cortex AI — Optimization", expanded=True):
+        st.caption("Token efficiency, expensive AI queries, tag coverage, and idle grantees.")
+        session = st.session_state.get("session")
+        if not session:
+            return
+        try:
+            df_eff = session.sql(_SQL_AI_TOKEN_EFFICIENCY).to_pandas()
+        except Exception:
+            st.info("No Cortex AI usage data available for optimization analysis.")
+            return
+        if not df_eff.empty:
+            st.markdown("##### Token Efficiency by Model (30d)")
+            st.dataframe(df_eff, use_container_width=True)
+        try:
+            df_top = session.sql(_SQL_AI_TOP_QUERIES).to_pandas()
+            if not df_top.empty:
+                st.markdown("##### Top 25 Most Expensive AI Queries (30d)")
+                st.dataframe(df_top, use_container_width=True)
+        except Exception:
+            pass
+        try:
+            df_tag = session.sql(_SQL_AI_TAG_COVERAGE).to_pandas()
+            if not df_tag.empty:
+                st.markdown("##### AI Query Tag Coverage by User")
+                fig = go.Figure(data=[go.Bar(
+                    x=df_tag["USER_NAME"], y=df_tag["TAG_COVERAGE_PCT"],
+                    marker_color=[_C1 if v >= 80 else (_CA if v >= 50 else '#E74C3C') for v in df_tag["TAG_COVERAGE_PCT"]],
+                    text=[f"{v:.0f}%" for v in df_tag["TAG_COVERAGE_PCT"]], textposition="outside")])
+                fig.update_layout(height=350, margin=dict(t=10, b=80, l=50, r=20),
+                    yaxis_title="Tag Coverage %", xaxis=dict(tickangle=-45))
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception:
+            pass
+        try:
+            df_idle = session.sql(_SQL_AI_IDLE_GRANTEES).to_pandas()
+            if not df_idle.empty:
+                st.markdown("##### Idle Cortex Grantees (roles with access but no usage in 30d)")
+                st.dataframe(df_idle, use_container_width=True)
+        except Exception:
+            pass
 
 
 def _render_show_commands():
