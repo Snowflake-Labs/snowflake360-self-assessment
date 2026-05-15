@@ -60,6 +60,37 @@ if _import_err:
     st.stop()
 
 
+_PREFS_TABLE = "DEMOS.S360_SELF_ASSESS.USER_PREFERENCES"
+
+
+def _get_preference(key: str, default=None):
+    try:
+        session = get_active_session()
+        rows = session.sql(
+            f"SELECT SETTING_VALUE FROM {_PREFS_TABLE} "
+            f"WHERE USER_NAME = CURRENT_USER() AND SETTING_KEY = '{key}'"
+        ).collect()
+        if rows:
+            return rows[0]["SETTING_VALUE"]
+    except Exception:
+        pass
+    return default
+
+
+def _set_preference(key: str, value: str):
+    try:
+        session = get_active_session()
+        session.sql(
+            f"MERGE INTO {_PREFS_TABLE} t "
+            f"USING (SELECT CURRENT_USER() AS USER_NAME, '{key}' AS SETTING_KEY, $${value}$$ AS SETTING_VALUE) s "
+            f"ON t.USER_NAME = s.USER_NAME AND t.SETTING_KEY = s.SETTING_KEY "
+            f"WHEN MATCHED THEN UPDATE SET SETTING_VALUE = s.SETTING_VALUE, UPDATED_AT = CURRENT_TIMESTAMP() "
+            f"WHEN NOT MATCHED THEN INSERT (USER_NAME, SETTING_KEY, SETTING_VALUE) VALUES (s.USER_NAME, s.SETTING_KEY, s.SETTING_VALUE)"
+        ).collect()
+    except Exception:
+        pass
+
+
 _LLM_FILTER_PREFIXES = (
     "claude-", "deepseek-", "gemini-", "llama3.", "llama4",
     "mistral-large", "openai-", "snowflake-llama",
@@ -407,21 +438,18 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
         unsafe_allow_html=True
     )
 
-    with st.spinner("Probing available AI models..."):
-        AVAILABLE_LLMS = _fetch_available_models()
-    if not AVAILABLE_LLMS:
-        st.warning(
-            "No models found. An ACCOUNTADMIN must run "
-            "`CALL SNOWFLAKE.MODELS.CORTEX_BASE_MODELS_REFRESH();` to register "
-            "available Cortex models. "
-            "[Documentation](https://docs.snowflake.com/en/user-guide/snowflake-cortex/aisql#control-model-access)"
-        )
-        st.stop()
+    if "_available_models" not in st.session_state:
+        st.session_state._available_models = []
 
     if "selected_llm" not in st.session_state:
-        st.session_state.selected_llm = "claude-sonnet-4-6" if "claude-sonnet-4-6" in AVAILABLE_LLMS else AVAILABLE_LLMS[0]
+        _persisted = _get_preference("selected_llm")
+        st.session_state.selected_llm = _persisted if _persisted else "claude-sonnet-4-6"
 
-    _llm_col, _test_col, _all_col, _run_col = st.columns([3, 0.6, 1.2, 1.2])
+    AVAILABLE_LLMS = st.session_state._available_models
+    if not AVAILABLE_LLMS:
+        AVAILABLE_LLMS = [st.session_state.selected_llm]
+
+    _llm_col, _probe_col, _test_col, _all_col, _run_col = st.columns([3, 1.2, 0.6, 1.2, 1.2])
     with _llm_col:
         _chosen = st.selectbox(
             "Choose LLM",
@@ -431,7 +459,28 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
             key="_llm_selector",
             label_visibility="collapsed",
         )
-        st.session_state.selected_llm = _chosen
+        if _chosen != st.session_state.selected_llm:
+            st.session_state.selected_llm = _chosen
+            _set_preference("selected_llm", _chosen)
+        else:
+            st.session_state.selected_llm = _chosen
+    with _probe_col:
+        if st.button("Probe Models", key="_probe_models_btn", type="secondary"):
+            with st.spinner("Probing available AI models..."):
+                _fetch_available_models.clear()
+                _models = _fetch_available_models()
+                if _models:
+                    st.session_state._available_models = _models
+                    if st.session_state.selected_llm not in _models:
+                        st.session_state.selected_llm = "claude-sonnet-4-6" if "claude-sonnet-4-6" in _models else _models[0]
+                        _set_preference("selected_llm", st.session_state.selected_llm)
+                    st.experimental_rerun()
+                else:
+                    st.warning(
+                        "No models found. An ACCOUNTADMIN must run "
+                        "`CALL SNOWFLAKE.MODELS.CORTEX_BASE_MODELS_REFRESH();` "
+                        "[Docs](https://docs.snowflake.com/en/user-guide/snowflake-cortex/aisql#control-model-access)"
+                    )
     with _test_col:
         if st.button("Test", key="_test_llm", type="secondary"):
             st.session_state._llm_test_running = True

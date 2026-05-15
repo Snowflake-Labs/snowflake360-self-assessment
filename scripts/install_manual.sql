@@ -91,6 +91,17 @@ CREATE STAGE IF NOT EXISTS IDENTIFIER($v_database || '.' || $v_schema || '.' || 
     COMMENT   = 'Hosts S360 Self-Assessment Streamlit source files';
 
 -- =============================================================================
+-- STEP 4b — User Preferences table (persists LLM choice per user)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS IDENTIFIER($v_database || '.' || $v_schema || '.USER_PREFERENCES') (
+    USER_NAME      VARCHAR NOT NULL,
+    SETTING_KEY    VARCHAR NOT NULL,
+    SETTING_VALUE  VARCHAR,
+    UPDATED_AT     TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    PRIMARY KEY (USER_NAME, SETTING_KEY)
+);
+
+-- =============================================================================
 -- STEP 5 — Streamlit app shell
 -- (The app will show a blank page until files are uploaded in Step 6)
 -- =============================================================================

@@ -51,3 +51,12 @@ GRANT USAGE            ON DATABASE  IDENTIFIER('<% database %>')               T
 GRANT ALL              ON SCHEMA    IDENTIFIER('<% database %>.<% schema %>')  TO ROLE IDENTIFIER('<% role %>');
 GRANT CREATE STREAMLIT ON SCHEMA    IDENTIFIER('<% database %>.<% schema %>')  TO ROLE IDENTIFIER('<% role %>');
 GRANT CREATE STAGE     ON SCHEMA    IDENTIFIER('<% database %>.<% schema %>')  TO ROLE IDENTIFIER('<% role %>');
+
+-- ── User Preferences table (persists LLM choice and other settings) ────────
+CREATE TABLE IF NOT EXISTS IDENTIFIER('<% database %>.<% schema %>.USER_PREFERENCES') (
+    USER_NAME      VARCHAR NOT NULL,
+    SETTING_KEY    VARCHAR NOT NULL,
+    SETTING_VALUE  VARCHAR,
+    UPDATED_AT     TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    PRIMARY KEY (USER_NAME, SETTING_KEY)
+);
