@@ -91,6 +91,12 @@ def _set_preference(key: str, value: str):
         pass
 
 
+def _persist_rates():
+    _set_preference("rate_credit", str(st.session_state.rate_credit))
+    _set_preference("rate_storage", str(st.session_state.rate_storage))
+    _set_preference("rate_transfer", str(st.session_state.rate_transfer))
+
+
 _LLM_FILTER_PREFIXES = (
     "claude-", "deepseek-", "gemini-", "llama3.", "llama4",
     "mistral-large", "openai-", "snowflake-llama",
@@ -307,11 +313,11 @@ if '_charts_completed' not in st.session_state:
 if '_charts_running' not in st.session_state:
     st.session_state._charts_running = False
 if 'rate_credit' not in st.session_state:
-    st.session_state.rate_credit = 3.0
+    st.session_state.rate_credit = float(_get_preference("rate_credit", "3.0"))
 if 'rate_storage' not in st.session_state:
-    st.session_state.rate_storage = 23.0
+    st.session_state.rate_storage = float(_get_preference("rate_storage", "23.0"))
 if 'rate_transfer' not in st.session_state:
-    st.session_state.rate_transfer = 0.0
+    st.session_state.rate_transfer = float(_get_preference("rate_transfer", "0.0"))
 
 _core_topics = [t for t in menu_options if t != "Home"]
 
@@ -341,6 +347,7 @@ with st.sidebar:
             if st.session_state.selected_menu != topic:
                 st.session_state.topic_nav_count += 1
             st.session_state.selected_menu = topic
+            _persist_rates()
 
     _sel_key = _nav_key(st.session_state.selected_menu) if st.session_state.selected_menu else ""
     if _sel_key:
@@ -550,6 +557,7 @@ if not st.session_state.selected_menu or st.session_state.selected_menu == "Home
     }
 
     if _run_clicked and _selected_topics:
+        _persist_rates()
         st.session_state._charts_running = True
         _session = st.session_state.get("session")
 
