@@ -66,6 +66,10 @@ GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER
 --        This can take 1-2 minutes. Safe to re-run at any time.
 CALL SNOWFLAKE.MODELS.CORTEX_BASE_MODELS_REFRESH();
 
+-- 3b-iii. (OPTIONAL) Enable cross-region inference for broader model availability.
+--         Uncomment the line below if your region has limited model support.
+-- ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
+
 -- 3c. Warehouse, database, schema access
 GRANT USAGE ON WAREHOUSE IDENTIFIER($v_warehouse)
     TO ROLE IDENTIFIER($v_role);

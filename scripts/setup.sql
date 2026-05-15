@@ -45,6 +45,9 @@ GRANT DATABASE ROLE SNOWFLAKE.CORTEX_USER TO ROLE IDENTIFIER('<% role %>');
 -- ── Cortex model registry (populates SNOWFLAKE.MODELS for dynamic LLM list) ─
 CALL SNOWFLAKE.MODELS.CORTEX_BASE_MODELS_REFRESH();
 
+-- ── (OPTIONAL) Cross-region inference for broader model availability ────────
+-- ALTER ACCOUNT SET CORTEX_ENABLED_CROSS_REGION = 'ANY_REGION';
+
 -- ── App object privileges ────────────────────────────────────────────────────
 GRANT USAGE            ON WAREHOUSE IDENTIFIER('<% warehouse %>')              TO ROLE IDENTIFIER('<% role %>');
 GRANT USAGE            ON DATABASE  IDENTIFIER('<% database %>')               TO ROLE IDENTIFIER('<% role %>');

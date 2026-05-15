@@ -60,7 +60,7 @@ if _import_err:
     st.stop()
 
 
-_PREFS_TABLE = "DEMOS.S360_SELF_ASSESS.USER_PREFERENCES"
+_PREFS_TABLE = "USER_PREFERENCES"
 
 
 def _get_preference(key: str, default=None):
