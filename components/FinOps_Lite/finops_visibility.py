@@ -364,6 +364,8 @@ def comp_finops_visibility(entry_actions=None):
         st.markdown("Warehouse forecast heatmap using the selected customer's credit price from Customer Info. Low projected spend is shaded toward cyan and high projected spend toward orange.")
         _render_wh_eac_heatmap()
 
+        _render_cortex_ai_visibility()
+
     except Exception as e:
         st.markdown(
             f'<div style="background-color: #FDEDEC; border-left: 6px solid {_CA}; padding: 10px;">'
@@ -793,3 +795,138 @@ def _render_wh_eac_heatmap():
         f'{styler.to_html()}</div>',
         unsafe_allow_html=True,
     )
+
+
+_SQL_AI_KPIS = """
+SELECT
+    COALESCE(SUM(CREDITS), 0) AS TOTAL_CREDITS_30D,
+    COUNT(DISTINCT QUERY_ID) AS QUERY_COUNT,
+    COUNT(DISTINCT USER_ID) AS USER_COUNT,
+    COUNT(DISTINCT FUNCTION_NAME) AS FUNCTION_COUNT
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+WHERE START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+"""
+
+_SQL_AI_DAILY_TREND = """
+SELECT
+    DATE_TRUNC('day', START_TIME)::DATE AS USAGE_DATE,
+    FUNCTION_NAME,
+    ROUND(SUM(CREDITS), 6) AS TOTAL_CREDITS,
+    COUNT(DISTINCT QUERY_ID) AS QUERY_COUNT
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+WHERE START_TIME >= DATEADD('day', -90, CURRENT_DATE())
+GROUP BY 1, 2
+ORDER BY USAGE_DATE ASC, TOTAL_CREDITS DESC
+"""
+
+_SQL_AI_FUNC_MODEL = """
+SELECT
+    FUNCTION_NAME,
+    COALESCE(MODEL_NAME, '(none)') AS MODEL_NAME,
+    ROUND(SUM(CREDITS), 6) AS TOTAL_CREDITS,
+    COUNT(DISTINCT QUERY_ID) AS QUERY_COUNT,
+    ROUND(100 * SUM(CREDITS) / NULLIF(SUM(SUM(CREDITS)) OVER (), 0), 2) AS PCT_OF_TOTAL
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+WHERE START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY 1, 2
+ORDER BY TOTAL_CREDITS DESC
+"""
+
+_SQL_AI_TOP_USERS = """
+SELECT
+    u.NAME AS USER_NAME,
+    ROUND(SUM(h.CREDITS), 6) AS TOTAL_CREDITS,
+    COUNT(DISTINCT h.QUERY_ID) AS QUERY_COUNT,
+    COUNT(DISTINCT h.FUNCTION_NAME) AS FUNCTIONS_USED,
+    ROUND(100 * SUM(h.CREDITS) / NULLIF(SUM(SUM(h.CREDITS)) OVER (), 0), 2) AS PCT_OF_TOTAL
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY h
+LEFT JOIN SNOWFLAKE.ACCOUNT_USAGE.USERS u ON h.USER_ID = u.USER_ID
+WHERE h.START_TIME >= DATEADD('day', -30, CURRENT_DATE())
+GROUP BY 1
+ORDER BY TOTAL_CREDITS DESC
+LIMIT 20
+"""
+
+_SQL_AI_CUMULATIVE = """
+SELECT
+    DATE_TRUNC('day', START_TIME)::DATE AS DAY,
+    ROUND(SUM(CREDITS), 6) AS DAILY_AI_CREDITS,
+    SUM(SUM(CREDITS)) OVER (ORDER BY DATE_TRUNC('day', START_TIME)::DATE) AS CUMULATIVE_CREDITS_90D
+FROM SNOWFLAKE.ACCOUNT_USAGE.CORTEX_FUNCTIONS_USAGE_HISTORY
+WHERE START_TIME >= DATEADD('day', -90, CURRENT_DATE())
+GROUP BY 1
+ORDER BY DAY
+"""
+
+
+def _render_cortex_ai_visibility():
+    with st.expander("Cortex AI — Visibility", expanded=True):
+        st.caption("Cortex AI function credit spend, model usage, and user attribution (last 30 days).")
+        session = st.session_state.get("session")
+        if not session:
+            return
+        try:
+            df_kpi = session.sql(_SQL_AI_KPIS).to_pandas()
+        except Exception:
+            st.info("No Cortex AI usage data available (CORTEX_FUNCTIONS_USAGE_HISTORY not accessible).")
+            return
+        if df_kpi.empty or float(df_kpi.iloc[0].get("TOTAL_CREDITS_30D", 0) or 0) == 0:
+            st.info("No Cortex AI usage detected in the last 30 days.")
+            return
+        row = df_kpi.iloc[0]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("AI Credits (30d)", f"{float(row['TOTAL_CREDITS_30D']):,.4f}")
+        c2.metric("AI Queries", f"{int(row['QUERY_COUNT']):,}")
+        c3.metric("AI Users", f"{int(row['USER_COUNT']):,}")
+        c4.metric("Functions Used", f"{int(row['FUNCTION_COUNT']):,}")
+        try:
+            df_trend = session.sql(_SQL_AI_DAILY_TREND).to_pandas()
+            if not df_trend.empty:
+                st.markdown("##### Daily AI Credit Trend (90d)")
+                agg = df_trend.groupby("USAGE_DATE")["TOTAL_CREDITS"].sum().reset_index().sort_values("USAGE_DATE")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=agg["USAGE_DATE"], y=agg["TOTAL_CREDITS"],
+                    mode="lines+markers", line=dict(color=_C1, width=2), marker=dict(size=4)))
+                fig.update_layout(height=350, margin=dict(t=10, b=40, l=50, r=20), yaxis_title="Credits")
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception:
+            pass
+        col1, col2 = st.columns(2)
+        with col1:
+            try:
+                df_fm = session.sql(_SQL_AI_FUNC_MODEL).to_pandas()
+                if not df_fm.empty:
+                    st.markdown("##### AI Spend by Function x Model (30d)")
+                    df_fm["LABEL"] = df_fm["FUNCTION_NAME"] + " / " + df_fm["MODEL_NAME"]
+                    top = df_fm.head(15)
+                    fig = go.Figure(data=[go.Bar(y=top["LABEL"].tolist()[::-1], x=top["TOTAL_CREDITS"].tolist()[::-1],
+                        orientation="h", marker_color=_C1)])
+                    fig.update_layout(height=420, margin=dict(t=10, b=40, l=250, r=20), showlegend=False, xaxis_title="Credits")
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                pass
+        with col2:
+            try:
+                df_users = session.sql(_SQL_AI_TOP_USERS).to_pandas()
+                if not df_users.empty:
+                    st.markdown("##### Top 20 AI Users by Credits (30d)")
+                    fig = go.Figure(data=[go.Bar(y=df_users["USER_NAME"].tolist()[::-1], x=df_users["TOTAL_CREDITS"].tolist()[::-1],
+                        orientation="h", marker_color=_C2)])
+                    fig.update_layout(height=420, margin=dict(t=10, b=40, l=200, r=20), showlegend=False, xaxis_title="Credits")
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                pass
+        try:
+            df_cum = session.sql(_SQL_AI_CUMULATIVE).to_pandas()
+            if not df_cum.empty:
+                st.markdown("##### Cumulative AI Credits (90d)")
+                fig = go.Figure()
+                fig.add_trace(go.Bar(x=df_cum["DAY"], y=df_cum["DAILY_AI_CREDITS"], name="Daily", marker_color=_C3))
+                fig.add_trace(go.Scatter(x=df_cum["DAY"], y=df_cum["CUMULATIVE_CREDITS_90D"],
+                    mode="lines", name="Cumulative", yaxis="y2", line=dict(color=_CA, width=2)))
+                fig.update_layout(height=350, margin=dict(t=10, b=40, l=50, r=50),
+                    yaxis=dict(title="Daily"), yaxis2=dict(title="Cumulative", overlaying="y", side="right"),
+                    legend=dict(orientation="h", y=1.05, x=0))
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception:
+            pass

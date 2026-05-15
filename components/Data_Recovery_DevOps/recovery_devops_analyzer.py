@@ -45,7 +45,10 @@ def _call_cortex(session, model_name, prompt):
             return str(raw)
         return "No response from Cortex"
     except Exception as e:
-        return f"Error calling Cortex: {str(e)}"
+        err_msg = str(e)
+        if "deprecated" in err_msg.lower() or "not available" in err_msg.lower() or "not found" in err_msg.lower():
+            return "MODEL_UNAVAILABLE"
+        return f"Error calling Cortex: {err_msg}"
 
 
 def _gather_data(session):
@@ -206,7 +209,7 @@ def comp_recovery_devops_analyzer(entry_actions=None):
     tab_summary, tab_individual = st.tabs(["Summary Analysis", "Individual Task Analysis"])
 
     with tab_summary:
-        cache_key = "recovery_devops_analysis_result"
+        cache_key = f"recovery_devops_analysis_result_{model}"
 
         if cache_key not in st.session_state:
             status_text = st.empty()
@@ -230,6 +233,9 @@ def comp_recovery_devops_analyzer(entry_actions=None):
                     f"DATA:\n{data_summary}"
                 )
                 result = _call_cortex(session, model, prompt)
+                if result == "MODEL_UNAVAILABLE":
+                    st.warning(f"The model **{model}** is deprecated or unavailable. Please select a different LLM on the Home page.")
+                    return
                 st.session_state[cache_key] = result
             progress_bar.empty()
             status_text.empty()

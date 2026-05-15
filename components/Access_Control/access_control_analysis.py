@@ -45,7 +45,10 @@ def _call_cortex(session, model_name, prompt):
             return str(raw)
         return "No response from Cortex"
     except Exception as e:
-        return f"Error calling Cortex: {str(e)}"
+        err_msg = str(e)
+        if "deprecated" in err_msg.lower() or "not available" in err_msg.lower() or "not found" in err_msg.lower():
+            return "MODEL_UNAVAILABLE"
+        return f"Error calling Cortex: {err_msg}"
 
 
 def _gather_data(session):
@@ -220,10 +223,13 @@ def comp_access_control_analysis(entry_actions=None):
 
     model = st.session_state.get("selected_llm", "claude-3-7-sonnet")
 
-    tab_summary, tab_individual = st.tabs(["Summary Analysis", "Individual Role Analysis"])
+    tab_summary, tab_individual, tab_authz, tab_authn, tab_net = st.tabs([
+        "Summary Analysis", "Individual Role Analysis",
+        "Authorization", "Authentication", "Network Security",
+    ])
 
     with tab_summary:
-        cache_key = "access_control_analysis_result"
+        cache_key = f"access_control_analysis_result_{model}"
 
         if cache_key not in st.session_state:
             status_text = st.empty()
@@ -247,6 +253,9 @@ def comp_access_control_analysis(entry_actions=None):
                     f"DATA:\n{data_summary}"
                 )
                 result = _call_cortex(session, model, prompt)
+                if result == "MODEL_UNAVAILABLE":
+                    st.warning(f"The model **{model}** is deprecated or unavailable. Please select a different LLM on the Home page.")
+                    return
                 st.session_state[cache_key] = result
             progress_bar.empty()
             status_text.empty()
@@ -258,6 +267,181 @@ def comp_access_control_analysis(entry_actions=None):
                 raw_text = raw_text[1:-1]
             clean_text = raw_text.replace("\\n", "\n").replace("\\t", "  ")
             st.markdown(clean_text)
+
+    with tab_authz:
+        _render_subtopic_analysis(session, model, "authorization",
+            "You are a Snowflake RBAC expert. Analyze the following authorization data. "
+            "Focus on: role hierarchy health, orphan roles, excessive GRANT_OPTION usage, "
+            "admin-owned objects, privileged access patterns, and role consolidation opportunities. "
+            "Format with ## headers and bullet points.",
+            _gather_authorization_data)
+
+    with tab_authn:
+        _render_subtopic_analysis(session, model, "authentication",
+            "You are a Snowflake identity/security expert. Analyze the following authentication data. "
+            "Focus on: login failure patterns, MFA adoption gaps, credential hygiene (password age, "
+            "weak auth methods), PAT user risks, and session policy coverage. "
+            "Format with ## headers and bullet points.",
+            _gather_authentication_data)
+
+    with tab_net:
+        _render_subtopic_analysis(session, model, "network_security",
+            "You are a Snowflake network security expert. Analyze the following network policy data. "
+            "Focus on: policy coverage gaps, dangling policies, overly permissive IP rules, "
+            "users without network policy protection, and network rule modernization opportunities. "
+            "Format with ## headers and bullet points.",
+            _gather_network_data)
+
+
+def _render_subtopic_analysis(session, model, key, system_prompt, gather_fn):
+    cache_key = f"ac_{key}_analysis"
+    if st.button(f"Run {key.replace('_', ' ').title()} Analysis", key=f"ac_{key}_btn", type="primary"):
+        _prog = st.progress(0)
+        _stat = st.empty()
+        _stat.text("Gathering data...")
+        _prog.progress(30)
+        data_summary = gather_fn(session)
+        _stat.text("Running AI analysis...")
+        _prog.progress(70)
+        prompt = f"{system_prompt}\n\nDATA:\n{data_summary}"
+        result = _call_cortex(session, model, prompt)
+        if result == "MODEL_UNAVAILABLE":
+            st.warning(f"The model **{model}** is deprecated or unavailable. Please select a different LLM on the Home page.")
+            return
+        st.session_state[cache_key] = result
+        _prog.progress(100)
+        _prog.empty()
+        _stat.empty()
+
+    if cache_key in st.session_state:
+        st.markdown("---")
+        raw_text = st.session_state[cache_key]
+        if isinstance(raw_text, str) and raw_text.startswith('"') and raw_text.endswith('"'):
+            raw_text = raw_text[1:-1]
+        st.markdown(raw_text.replace("\\n", "\n").replace("\\t", "  "))
+
+
+def _gather_authorization_data(session):
+    sections = []
+    queries = [
+        ("ROLE_HIERARCHY", """
+            SELECT r.NAME, r.OWNER, r.IS_DEFAULT,
+                   COUNT(g.PRIVILEGE) AS GRANT_COUNT
+            FROM SNOWFLAKE.ACCOUNT_USAGE.ROLES r
+            LEFT JOIN SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES g
+              ON g.GRANTEE_NAME = r.NAME AND g.DELETED_ON IS NULL
+            WHERE r.DELETED_ON IS NULL
+            GROUP BY r.NAME, r.OWNER, r.IS_DEFAULT
+            ORDER BY GRANT_COUNT DESC
+            LIMIT 20
+        """),
+        ("GRANT_OPTION_USAGE", """
+            SELECT GRANTEE_NAME, COUNT(*) AS WITH_GRANT_OPTION_COUNT
+            FROM SNOWFLAKE.ACCOUNT_USAGE.GRANTS_TO_ROLES
+            WHERE DELETED_ON IS NULL AND GRANT_OPTION = 'true'
+            GROUP BY GRANTEE_NAME
+            ORDER BY WITH_GRANT_OPTION_COUNT DESC
+            LIMIT 15
+        """),
+        ("ADMIN_OWNED_OBJECTS", """
+            SELECT TABLE_CATALOG AS DB, COUNT(*) AS OBJ_COUNT
+            FROM SNOWFLAKE.ACCOUNT_USAGE.TABLES
+            WHERE DELETED IS NULL AND TABLE_OWNER IN ('ACCOUNTADMIN', 'SYSADMIN', 'SECURITYADMIN')
+            GROUP BY TABLE_CATALOG
+            ORDER BY OBJ_COUNT DESC
+            LIMIT 10
+        """),
+    ]
+    for label, sql in queries:
+        try:
+            rows = session.sql(sql).collect()
+            if rows:
+                lines = [f"{label}:"]
+                for r in rows[:15]:
+                    lines.append(f"  {dict(r)}")
+                sections.append("\n".join(lines))
+        except Exception as e:
+            sections.append(f"{label}: Error - {e}")
+    return "\n\n".join(sections) if sections else "No authorization data gathered."
+
+
+def _gather_authentication_data(session):
+    sections = []
+    queries = [
+        ("LOGIN_FAILURES_BY_METHOD", """
+            SELECT FIRST_AUTHENTICATION_FACTOR, IS_SUCCESS,
+                   COUNT(*) AS EVENT_COUNT
+            FROM SNOWFLAKE.ACCOUNT_USAGE.LOGIN_HISTORY
+            WHERE EVENT_TIMESTAMP >= DATEADD('day', -30, CURRENT_TIMESTAMP())
+            GROUP BY 1, 2
+            ORDER BY EVENT_COUNT DESC
+        """),
+        ("MFA_ADOPTION", """
+            SELECT TYPE,
+                   COUNT(*) AS TOTAL,
+                   SUM(CASE WHEN HAS_MFA = 'true' THEN 1 ELSE 0 END) AS MFA_ENABLED
+            FROM SNOWFLAKE.ACCOUNT_USAGE.USERS
+            WHERE DELETED_ON IS NULL
+            GROUP BY TYPE
+        """),
+        ("CREDENTIAL_AGE", """
+            SELECT NAME, TYPE, PASSWORD_LAST_SET_TIME,
+                   DATEDIFF('day', PASSWORD_LAST_SET_TIME, CURRENT_TIMESTAMP()) AS PASSWORD_AGE_DAYS
+            FROM SNOWFLAKE.ACCOUNT_USAGE.USERS
+            WHERE DELETED_ON IS NULL AND PASSWORD_LAST_SET_TIME IS NOT NULL
+            ORDER BY PASSWORD_AGE_DAYS DESC
+            LIMIT 15
+        """),
+    ]
+    for label, sql in queries:
+        try:
+            rows = session.sql(sql).collect()
+            if rows:
+                lines = [f"{label}:"]
+                for r in rows[:15]:
+                    lines.append(f"  {dict(r)}")
+                sections.append("\n".join(lines))
+        except Exception as e:
+            sections.append(f"{label}: Error - {e}")
+    return "\n\n".join(sections) if sections else "No authentication data gathered."
+
+
+def _gather_network_data(session):
+    sections = []
+    queries = [
+        ("NETWORK_POLICIES", """
+            SELECT POLICY_NAME, CREATED_ON, POLICY_OWNER
+            FROM SNOWFLAKE.ACCOUNT_USAGE.NETWORK_POLICIES
+            WHERE DELETED_ON IS NULL
+            ORDER BY CREATED_ON DESC
+        """),
+        ("NETWORK_RULES", """
+            SELECT RULE_NAME, DATABASE_NAME, TYPE, MODE, VALUE_LIST
+            FROM SNOWFLAKE.ACCOUNT_USAGE.NETWORK_RULES
+            WHERE DELETED_ON IS NULL
+            ORDER BY CREATED_ON DESC
+            LIMIT 20
+        """),
+        ("USER_POLICY_COVERAGE", """
+            SELECT
+                COUNT(*) AS TOTAL_USERS,
+                SUM(CASE WHEN u.HAS_NETWORK_POLICY = 'true' THEN 1 ELSE 0 END) AS WITH_POLICY,
+                SUM(CASE WHEN u.HAS_NETWORK_POLICY = 'false' OR u.HAS_NETWORK_POLICY IS NULL THEN 1 ELSE 0 END) AS WITHOUT_POLICY
+            FROM SNOWFLAKE.ACCOUNT_USAGE.USERS u
+            WHERE u.DELETED_ON IS NULL
+        """),
+    ]
+    for label, sql in queries:
+        try:
+            rows = session.sql(sql).collect()
+            if rows:
+                lines = [f"{label}:"]
+                for r in rows[:20]:
+                    lines.append(f"  {dict(r)}")
+                sections.append("\n".join(lines))
+        except Exception as e:
+            sections.append(f"{label}: Error - {e}")
+    return "\n\n".join(sections) if sections else "No network data gathered."
 
     with tab_individual:
         entity_cache = "ac_entity_list"
